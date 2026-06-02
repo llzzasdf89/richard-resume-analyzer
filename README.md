@@ -133,8 +133,14 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env，填入 API Key
 
-# 启动
+
+# 1. 第一次部署时初始化数据库（只需要跑一次）
+
+python init_db.py
+
+# 启动服务
 uvicorn main:server --reload --port 8000
+
 ```
 
 ### 启动前端

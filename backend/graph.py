@@ -49,7 +49,9 @@ def jd_analysis_node(state: ResumeAnalysisState) -> dict:
 def rag_retrieval_node(state: ResumeAnalysisState) -> dict:
     """RAG 检索节点：检索相似岗位历史数据"""
     query = f"{state['jd_requirements']} {' '.join(state['jd_must_skills'])}"
+    print(f"RAG 查询词：{query}")  # 加这行
     context = search_similar_jds(query)
+    print(f"RAG 检索结果：\n{context[:300]}")
     return {"rag_context": context}
 
 def match_analysis_node(state: ResumeAnalysisState) -> dict:

@@ -1,47 +1,89 @@
 # rag.py
-from langchain_anthropic import ChatAnthropic
-from langchain_community.vectorstores.pgvector import PGVector
-from langchain_core.documents import Document
 from dotenv import load_dotenv
 import os
+from db import get_conn
+import requests
+import numpy as np
 
 load_dotenv()
 
-# 用 Anthropic 的 Embedding（DashScope 中转）
-from langchain_community.embeddings import DashScopeEmbeddings
+DATABASE_URL = os.getenv("DATABASE_URL")
+DASHSCOPE_API_KEY = os.getenv("API_KEY")
 
-embeddings = DashScopeEmbeddings(
-    model="text-embedding-v3",
-    dashscope_api_key=os.getenv("API_KEY"),
-)
+# ── Embedding ─────────────────────────────────────────────
 
-CONNECTION_STRING = os.getenv("DATABASE_URL")
-COLLECTION_NAME = "jd_knowledge"
-
-def get_vectorstore():
-    return PGVector(
-        collection_name=COLLECTION_NAME,
-        connection_string=CONNECTION_STRING,
-        embedding_function=embeddings,
+def get_embedding(text: str) -> list[float]:
+    """调用 DashScope Embedding API"""
+    res = requests.post(
+        "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
+        headers={
+            "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "text-embedding-v3",
+            "input": {"texts": [text]},
+            "parameters": {"dimension": 1024}
+        }
     )
+    return res.json()["output"]["embeddings"][0]["embedding"]
+
+# ── 写入 JD ────────────────────────────────────────────────
 
 def add_jd_to_knowledge(title: str, content: str):
-    """向知识库添加 JD"""
-    vectorstore = get_vectorstore()
-    doc = Document(
-        page_content=content,
-        metadata={"title": title}
+    embedding = get_embedding(content)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO jd_knowledge (title, content, embedding) VALUES (%s, %s, %s)",
+        (title, content, np.array(embedding))  # 转成 numpy array
     )
-    vectorstore.add_documents([doc])
+    conn.commit()
+    cur.close()
+    conn.close()
     return "添加成功"
 
 def search_similar_jds(query: str, k: int = 3) -> str:
-    """检索相似 JD"""
-    vectorstore = get_vectorstore()
-    docs = vectorstore.similarity_search(query, k=k)
-    if not docs:
+    embedding = get_embedding(query)
+    embedding_str = "[" + ",".join(map(str, embedding)) + "]"
+    print(f"embedding_str 前50字符：{embedding_str[:50]}")
+    print(f"embedding_str 长度：{len(embedding_str)}")
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("SELECT COUNT(*) FROM jd_knowledge")
+        count = cur.fetchone()[0]
+        print(f"知识库总数据量：{count}")
+
+        cur.execute(
+            f"""
+            SELECT title, content
+            FROM jd_knowledge
+            ORDER BY embedding <=> '{embedding_str}'::vector
+            LIMIT {k}
+            """
+        )
+        rows = cur.fetchall()
+        print(f"检索到的行数：{len(rows)}")
+        if rows:
+            for row in rows:
+                print(f"  标题：{row[0]}")
+
+    except Exception as e:
+        import traceback
+        print(f"SQL 执行错误：{traceback.format_exc()}")
+        rows = []
+
+    finally:
+        cur.close()
+        conn.close()
+
+    if not rows:
         return "知识库暂无相似岗位数据"
+
     results = []
-    for doc in docs:
-        results.append(f"【{doc.metadata.get('title', '未知岗位')}】\n{doc.page_content}")
+    for title, content in rows:
+        results.append(f"【{title}】\n{content}")
     return "\n\n---\n\n".join(results)
