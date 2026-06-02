@@ -1,5 +1,5 @@
 import type { AnalysisStep } from "../types";
-
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 export async function analyzeResume(
   resume: File,
   jd: string,
@@ -9,7 +9,7 @@ export async function analyzeResume(
   formData.append("resume", resume);
   formData.append("jd", jd);
 
-  const res = await fetch("/api/analyze", {
+  const res = await fetch(BASE_URL + "/api/analyze", {
     method: "POST",
     body: formData,
   });
