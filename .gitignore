@@ -1,0 +1,52 @@
+# ── 环境变量（绝对不能提交）──────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+
+# ── 前端（Node.js）────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# ── 后端（Python）─────────────────────────────────────────
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.py[cod]
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# ── 数据库 / 向量存储 ──────────────────────────────────────
+backend/chroma_db/
+backend/*.db
+backend/*.sqlite
+
+# ── Docker ────────────────────────────────────────────────
+# Docker 配置文件提交，不忽略
+
+# ── IDE ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── macOS ─────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── 日志 ──────────────────────────────────────────────────
+*.log
+logs/
+
+# ── 测试文件 ───────────────────────────────────────────────
+*.pdf
+test_*.pdf
+output_*.txt
