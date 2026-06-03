@@ -2,6 +2,7 @@
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from graph import app as analysis_graph
 from tools import parse_pdf
@@ -10,11 +11,18 @@ from dotenv import load_dotenv
 import json
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from db import init_db
 import os
 
 load_dotenv()
 
-server = FastAPI(title="Resume Analyzer API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时初始化数据库
+    init_db()
+    yield
+
+server = FastAPI(title="Resume Analyzer API", lifespan = lifespan)
 executor = ThreadPoolExecutor()
 
 server.add_middleware(
