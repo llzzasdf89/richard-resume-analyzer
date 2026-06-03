@@ -95,17 +95,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "dist/*"
-          target: "/tmp/resume-analyzer-dist"
-          strip_components: 1
-
-      - name: Upload files to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "docker-compose.yml"
+          source: "dist/"
           target: "~/richard-resume-analyzer/"
 
       - name: Deploy on EC2
