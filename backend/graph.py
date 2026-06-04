@@ -64,6 +64,15 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
   "matched_skills": ["技能1", "技能2"],
   "missing_skills": ["缺失技能1", "缺失技能2"]
 }
+
+评分规则：
+- 90-100：技能高度匹配，几乎满足所有要求
+- 70-89：核心技能匹配，少量缺口
+- 40-69：部分匹配，有明显缺口
+- 10-39：相关性低，主要技能不符
+- 1-9：几乎无相关技能，但候选人有基础工程能力
+- 只有在候选人完全没有任何技术背景时才给 0 分
+
 只返回 JSON，不要其他内容。"""),
         HumanMessage(f"""简历内容：
 {state['resume_text']}
@@ -80,7 +89,7 @@ JD 核心要求：
 参考相似岗位：
 {state['rag_context']}""")
     ])
-
+    print(f"[DEBUG] match_analysis 原始返回: {response.content[:500]}")
     try:
         data = json.loads(response.content)
         return {
