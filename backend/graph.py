@@ -2,6 +2,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
+from langfuse.decorators import observe
 from state import ResumeAnalysisState
 from rag import search_similar_jds
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ model = ChatAnthropic(
 
 # ── 节点定义 ────────────────────────────────────────────────
 
+@observe(name="jd_analysis")
 def jd_analysis_node(state: ResumeAnalysisState) -> dict:
     """JD 分析 Agent：提取核心要求、必备技能、加分项"""
     response = model.invoke([
@@ -46,6 +48,7 @@ def jd_analysis_node(state: ResumeAnalysisState) -> dict:
             "jd_nice_skills": [],
         }
 
+@observe(name="rag_retrieval")
 def rag_retrieval_node(state: ResumeAnalysisState) -> dict:
     """RAG 检索节点：检索相似岗位历史数据"""
     query = f"{state['jd_requirements']} {' '.join(state['jd_must_skills'])}"
@@ -54,6 +57,7 @@ def rag_retrieval_node(state: ResumeAnalysisState) -> dict:
     print(f"RAG 检索结果：\n{context[:300]}")
     return {"rag_context": context}
 
+@observe(name="match_analysis")
 def match_analysis_node(state: ResumeAnalysisState) -> dict:
     """匹配分析 Agent：评分 + 匹配点 + 技能缺口"""
     response = model.invoke([
@@ -64,6 +68,15 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
   "matched_skills": ["技能1", "技能2"],
   "missing_skills": ["缺失技能1", "缺失技能2"]
 }
+
+评分规则：
+- 90-100：技能高度匹配，几乎满足所有要求
+- 70-89：核心技能匹配，少量缺口
+- 40-69：部分匹配，有明显缺口
+- 10-39：相关性低，主要技能不符
+- 1-9：几乎无相关技能，但候选人有基础工程能力
+- 只有在候选人完全没有任何技术背景时才给 0 分
+
 只返回 JSON，不要其他内容。"""),
         HumanMessage(f"""简历内容：
 {state['resume_text']}
@@ -80,7 +93,7 @@ JD 核心要求：
 参考相似岗位：
 {state['rag_context']}""")
     ])
-
+    print(f"[DEBUG] match_analysis 原始返回: {response.content[:500]}")
     try:
         data = json.loads(response.content)
         return {
@@ -95,6 +108,7 @@ JD 核心要求：
             "missing_skills": [],
         }
 
+@observe(name="suggestions")
 def suggestions_node(state: ResumeAnalysisState) -> dict:
     """优化建议 Agent：生成针对性建议"""
     response = model.invoke([
@@ -112,6 +126,7 @@ def suggestions_node(state: ResumeAnalysisState) -> dict:
     ])
     return {"suggestions": response.content}
 
+@observe(name="rewrite")
 def rewrite_node(state: ResumeAnalysisState) -> dict:
     """简历重写 Agent：针对 JD 重写简历关键段落"""
     response = model.invoke([

@@ -13,8 +13,36 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from db import init_db
 import os
+from langfuse.decorators import observe, langfuse_context
+from langfuse import Langfuse
 
 load_dotenv()
+
+lf = Langfuse()
+langfuse_context.configure(
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    host=os.getenv("LANGFUSE_HOST", "https://jp.cloud.langfuse.com"),
+    debug=False,
+)
+
+@observe(name="resume-analyze")
+def run_graph(resume_text: str, jd_text: str):
+    return analysis_graph.invoke({
+        "messages": [],
+        "resume_text": resume_text,
+        "jd_text": jd_text,
+        "jd_requirements": "",
+        "jd_must_skills": [],
+        "jd_nice_skills": [],
+        "rag_context": "",
+        "match_score": 0,
+        "matched_skills": [],
+        "missing_skills": [],
+        "suggestions": "",
+        "rewritten_resume": "",
+        "error": "",
+    })
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,22 +77,9 @@ async def analyze(
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 executor,
-                lambda: analysis_graph.invoke({
-                    "messages": [],
-                    "resume_text": resume_text,
-                    "jd_text": jd,
-                    "jd_requirements": "",
-                    "jd_must_skills": [],
-                    "jd_nice_skills": [],
-                    "rag_context": "",
-                    "match_score": 0,
-                    "matched_skills": [],
-                    "missing_skills": [],
-                    "suggestions": "",
-                    "rewritten_resume": "",
-                    "error": "",
-                })
+                lambda: run_graph(resume_text,jd_text=jd)
             )
+            langfuse_context.flush()
 
             # 逐步返回各阶段结果
             yield f"data: {json.dumps({'type': 'step', 'step': 'jd_analysis', 'content': {'requirements': result['jd_requirements'], 'must_skills': result['jd_must_skills'], 'nice_skills': result['jd_nice_skills']}}, ensure_ascii=False)}\n\n"
