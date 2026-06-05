@@ -19,5 +19,6 @@ dependencies = [
     "pymupdf>=1.27.2.3",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.30",
+    "tavily-python>=0.5.0",
     "uvicorn>=0.48.0",
 ]
