@@ -1,10 +1,11 @@
 # graph.py
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langfuse.decorators import observe
 from state import ResumeAnalysisState
 from rag import search_similar_jds
+from tools import search_similar_jobs, get_skill_market_demand
 from dotenv import load_dotenv
 import os
 import json
@@ -16,6 +17,11 @@ model = ChatAnthropic(
     base_url=os.getenv("BASE_URL"),
     model=os.getenv("MODEL_NAME"),
 )
+
+# 绑定工具的模型，专用于 match_analysis ReAct Agent
+_tools = [search_similar_jobs, get_skill_market_demand]
+_tool_map = {t.name: t for t in _tools}
+model_with_tools = model.bind_tools(_tools)
 
 # ── 节点定义 ────────────────────────────────────────────────
 
@@ -59,10 +65,20 @@ def rag_retrieval_node(state: ResumeAnalysisState) -> dict:
 
 @observe(name="match_analysis")
 def match_analysis_node(state: ResumeAnalysisState) -> dict:
-    """匹配分析 Agent：评分 + 匹配点 + 技能缺口"""
-    response = model.invoke([
+    """匹配分析 Agent：ReAct 循环，自主决定是否调用工具查询市场信息，再给出评分"""
+
+    messages = [
         SystemMessage("""你是一个简历匹配分析专家。
-根据简历和 JD 要求，分析匹配情况，以 JSON 格式返回：
+
+你有两个工具可以调用：
+- search_similar_jobs：根据技能/岗位关键词检索知识库中相似的岗位JD，用于参考市场要求
+- get_skill_market_demand：查询某个技能的市场需求程度，用于判断缺失技能的严重性
+
+分析步骤：
+1. 先阅读简历和JD，初步判断哪些缺失技能是关键缺口
+2. 对你不确定重要性的技能，调用 get_skill_market_demand 查询
+3. 如果需要更多市场参考，调用 search_similar_jobs 检索相似岗位
+4. 综合所有信息后，以 JSON 格式输出最终结果：
 {
   "match_score": 75,
   "matched_skills": ["技能1", "技能2"],
@@ -75,9 +91,9 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
 - 40-69：部分匹配，有明显缺口
 - 10-39：相关性低，主要技能不符
 - 1-9：几乎无相关技能，但候选人有基础工程能力
-- 只有在候选人完全没有任何技术背景时才给 0 分
+- 只有候选人完全没有任何技术背景时才给 0 分
 
-只返回 JSON，不要其他内容。"""),
+完成工具调用后，只返回 JSON，不要其他内容。"""),
         HumanMessage(f"""简历内容：
 {state['resume_text']}
 
@@ -90,12 +106,48 @@ JD 核心要求：
 加分技能：
 {', '.join(state['jd_nice_skills'])}
 
-参考相似岗位：
-{state['rag_context']}""")
-    ])
-    print(f"[DEBUG] match_analysis 原始返回: {response.content[:500]}")
+RAG 参考（已检索）：
+{state['rag_context']}
+
+请开始分析。"""),
+    ]
+
+    # ── ReAct 循环 ────────────────────────────────────────────
+    MAX_ITERATIONS = 5  # 防止无限循环
+    for i in range(MAX_ITERATIONS):
+        response = model_with_tools.invoke(messages)
+        messages.append(response)
+
+        print(f"[DEBUG] match_analysis 第{i+1}轮，tool_calls: {[tc['name'] for tc in response.tool_calls]}")
+
+        # 没有工具调用 → 模型认为推理完成，退出循环
+        if not response.tool_calls:
+            break
+
+        # 执行所有工具调用，把结果还给模型
+        for tool_call in response.tool_calls:
+            tool_fn = _tool_map.get(tool_call["name"])
+            if tool_fn is None:
+                result = f"未知工具：{tool_call['name']}"
+            else:
+                result = tool_fn.invoke(tool_call["args"])
+                print(f"[DEBUG] 工具 {tool_call['name']} 返回: {str(result)[:200]}")
+
+            messages.append(ToolMessage(
+                content=str(result),
+                tool_call_id=tool_call["id"],
+            ))
+        # 继续循环，让模型看到工具结果后决定下一步
+
+    # ── 解析最终输出 ──────────────────────────────────────────
+    final_content = response.content if isinstance(response.content, str) else ""
+    print(f"[DEBUG] match_analysis 最终输出: {final_content[:500]}")
+
     try:
-        data = json.loads(response.content)
+        # 兼容模型在 JSON 前后附带说明文字的情况
+        start = final_content.find("{")
+        end = final_content.rfind("}") + 1
+        data = json.loads(final_content[start:end])
         return {
             "match_score": data.get("match_score", 0),
             "matched_skills": data.get("matched_skills", []),
@@ -146,6 +198,20 @@ def rewrite_node(state: ResumeAnalysisState) -> dict:
     ])
     return {"rewritten_resume": response.content}
 
+# ── 条件路由 ──────────────────────────────────────────────
+
+def route_after_match(state: ResumeAnalysisState) -> str:
+    """根据匹配分数决定下一个节点：
+    - 高匹配（>=75）：直接重写简历，跳过通用建议
+    - 低匹配（<75）：先给出针对性优化建议，再重写
+    """
+    score = state.get("match_score", 0)
+    print(f"[DEBUG] 匹配分数: {score}，路由至: {'rewrite' if score >= 75 else 'suggestions'}")
+    if score >= 75:
+        return "rewrite"
+    return "suggestions"
+
+
 # ── 构建图 ────────────────────────────────────────────────
 
 graph = StateGraph(ResumeAnalysisState)
@@ -159,7 +225,17 @@ graph.add_node("rewrite", rewrite_node)
 graph.set_entry_point("jd_analysis")
 graph.add_edge("jd_analysis", "rag_retrieval")
 graph.add_edge("rag_retrieval", "match_analysis")
-graph.add_edge("match_analysis", "suggestions")
+
+# 条件路由：高匹配直接重写，低匹配先给建议
+graph.add_conditional_edges(
+    "match_analysis",
+    route_after_match,
+    {
+        "rewrite": "rewrite",
+        "suggestions": "suggestions",
+    }
+)
+
 graph.add_edge("suggestions", "rewrite")
 graph.add_edge("rewrite", END)
 
