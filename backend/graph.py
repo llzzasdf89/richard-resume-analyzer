@@ -2,6 +2,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END
+from langgraph.types import Send
 from langfuse.decorators import observe
 from state import ResumeAnalysisState
 from rag import search_similar_jds
@@ -160,23 +161,119 @@ RAG 参考（已检索）：
             "missing_skills": [],
         }
 
-@observe(name="suggestions")
-def suggestions_node(state: ResumeAnalysisState) -> dict:
-    """优化建议 Agent：生成针对性建议"""
+@observe(name="supervisor")
+def supervisor_node(state: ResumeAnalysisState) -> dict:
+    """Supervisor Agent：分析当前匹配情况，决定启动哪些子 Agent"""
     response = model.invoke([
-        SystemMessage("你是一个简历优化专家，根据匹配分析结果给出具体可执行的优化建议。"),
+        SystemMessage("""你是一个任务分配专家，负责根据简历匹配情况决定启动哪些优化方向。
+
+你有三个子 Agent 可以调度：
+- skill_gap：当候选人有明显技能缺口时，专门给出学习路径和补足建议
+- expression：当简历表达可以优化时（措辞、量化数据、STAR 结构），给出具体改写建议
+- strategy：当需要投递策略建议时（投递时机、岗位选择、谈判策略），给出指导
+
+请根据以下情况，返回需要启动的子 Agent 列表（JSON 格式）：
+{"agents": ["skill_gap", "expression", "strategy"]}
+
+说明：可以选择 1-3 个，根据实际需要决定，不必全选。"""),
         HumanMessage(f"""匹配度：{state['match_score']}分
-
 已匹配技能：{', '.join(state['matched_skills'])}
-
 缺失技能：{', '.join(state['missing_skills'])}
-
-参考相似岗位建议：
-{state['rag_context']}
-
-请给出 3-5 条具体的简历优化建议，每条建议要有可执行的行动项。""")
+JD 核心要求：{state['jd_requirements']}"""),
     ])
-    return {"suggestions": response.content}
+
+    try:
+        data = json.loads(response.content)
+        agents = data.get("agents", ["skill_gap", "expression", "strategy"])
+    except Exception:
+        agents = ["skill_gap", "expression", "strategy"]
+
+    print(f"[DEBUG] Supervisor 决定启动子 Agent：{agents}")
+    return {"agents_to_run": agents}
+
+
+def supervisor_fan_out(state: ResumeAnalysisState) -> list[Send]:
+    """根据 supervisor 的决策，用 Send 并行分发到各子 Agent"""
+    agent_map = {
+        "skill_gap": "skill_gap_agent",
+        "expression": "expression_agent",
+        "strategy": "strategy_agent",
+    }
+    return [
+        Send(agent_map[agent], state)
+        for agent in state["agents_to_run"]
+        if agent in agent_map
+    ]
+
+
+@observe(name="skill_gap_agent")
+def skill_gap_agent_node(state: ResumeAnalysisState) -> dict:
+    """子 Agent：专门针对技能缺口给出学习路径和补足建议"""
+    response = model.invoke([
+        SystemMessage("你是一个技能成长顾问，专门帮助求职者分析技能缺口并给出可执行的学习路径。"),
+        HumanMessage(f"""候选人缺失以下技能：{', '.join(state['missing_skills'])}
+
+目标岗位核心要求：{state['jd_requirements']}
+
+请针对每个缺失技能，给出：
+1. 该技能的重要程度（必须补 / 加分项）
+2. 最短学习路径（具体资源或方式）
+3. 预计补足时间
+
+格式简洁，每个技能一段。"""),
+    ])
+    print(f"[DEBUG] skill_gap_agent 完成")
+    return {"sub_suggestions": [f"【技能缺口补足建议】\n{response.content}"]}
+
+
+@observe(name="expression_agent")
+def expression_agent_node(state: ResumeAnalysisState) -> dict:
+    """子 Agent：专门优化简历表达方式"""
+    response = model.invoke([
+        SystemMessage("你是一个简历表达优化专家，擅长将平淡的工作描述改写成有力的成果导向表达。"),
+        HumanMessage(f"""简历内容（节选关键部分）：
+{state['resume_text'][:1500]}
+
+目标 JD 关键词：{', '.join(state['jd_must_skills'])}
+
+请给出 2-3 条具体的表达优化建议，要求：
+- 指出原文中具体可以改进的句子或段落
+- 给出改写示例
+- 说明改写原则（量化数据 / STAR 结构 / 关键词匹配）"""),
+    ])
+    print(f"[DEBUG] expression_agent 完成")
+    return {"sub_suggestions": [f"【简历表达优化建议】\n{response.content}"]}
+
+
+@observe(name="strategy_agent")
+def strategy_agent_node(state: ResumeAnalysisState) -> dict:
+    """子 Agent：专门给出投递策略建议"""
+    response = model.invoke([
+        SystemMessage("你是一个求职策略顾问，擅长根据候选人现状给出务实的投递和谈判建议。"),
+        HumanMessage(f"""当前匹配度：{state['match_score']}分
+已匹配技能：{', '.join(state['matched_skills'])}
+缺失技能：{', '.join(state['missing_skills'])}
+以下是知识库中相似岗位的参考数据（仅供参考，不是候选人要投的岗位）：
+{state['rag_context'][:500]}
+
+候选人当前要投递的目标岗位要求是：
+{state['jd_requirements']}
+
+请给出 2-3 条投递策略建议，包括：
+- 当前匹配度下是否值得投递
+- 投递时如何在 cover letter 或沟通中扬长避短
+- 是否有更适合的相近岗位方向"""),
+    ])
+    print(f"[DEBUG] strategy_agent 完成")
+    return {"sub_suggestions": [f"【投递策略建议】\n{response.content}"]}
+
+
+@observe(name="aggregate_suggestions")
+def aggregate_suggestions_node(state: ResumeAnalysisState) -> dict:
+    """聚合节点：汇总所有子 Agent 的输出"""
+    combined = "\n\n---\n\n".join(state.get("sub_suggestions", []))
+    print(f"[DEBUG] 聚合 {len(state.get('sub_suggestions', []))} 个子 Agent 结果")
+    return {"suggestions": combined}
 
 @observe(name="rewrite")
 def rewrite_node(state: ResumeAnalysisState) -> dict:
@@ -202,14 +299,13 @@ def rewrite_node(state: ResumeAnalysisState) -> dict:
 
 def route_after_match(state: ResumeAnalysisState) -> str:
     """根据匹配分数决定下一个节点：
-    - 高匹配（>=75）：直接重写简历，跳过通用建议
-    - 低匹配（<75）：先给出针对性优化建议，再重写
+    - 高匹配（>=75）：直接重写简历，跳过 Supervisor 流程
+    - 低匹配（<75）：走 Supervisor → 子 Agent 并行 → 聚合 → 重写
     """
     score = state.get("match_score", 0)
-    print(f"[DEBUG] 匹配分数: {score}，路由至: {'rewrite' if score >= 75 else 'suggestions'}")
-    if score >= 75:
-        return "rewrite"
-    return "suggestions"
+    route = "rewrite" if score >= 75 else "supervisor"
+    print(f"[DEBUG] 匹配分数: {score}，路由至: {route}")
+    return route
 
 
 # ── 构建图 ────────────────────────────────────────────────
@@ -219,24 +315,35 @@ graph = StateGraph(ResumeAnalysisState)
 graph.add_node("jd_analysis", jd_analysis_node)
 graph.add_node("rag_retrieval", rag_retrieval_node)
 graph.add_node("match_analysis", match_analysis_node)
-graph.add_node("suggestions", suggestions_node)
+
+# Multi-Agent 节点
+graph.add_node("supervisor", supervisor_node)
+graph.add_node("skill_gap_agent", skill_gap_agent_node)
+graph.add_node("expression_agent", expression_agent_node)
+graph.add_node("strategy_agent", strategy_agent_node)
+graph.add_node("aggregate_suggestions", aggregate_suggestions_node)
+
 graph.add_node("rewrite", rewrite_node)
 
 graph.set_entry_point("jd_analysis")
 graph.add_edge("jd_analysis", "rag_retrieval")
 graph.add_edge("rag_retrieval", "match_analysis")
 
-# 条件路由：高匹配直接重写，低匹配先给建议
+# match_analysis 后条件路由
 graph.add_conditional_edges(
     "match_analysis",
-    route_after_match,
-    {
-        "rewrite": "rewrite",
-        "suggestions": "suggestions",
-    }
+    route_after_match
 )
 
-graph.add_edge("suggestions", "rewrite")
+# Supervisor 决策后并行 fan-out（Send API）
+graph.add_conditional_edges("supervisor", supervisor_fan_out)
+
+# 三个子 Agent 都汇入聚合节点
+graph.add_edge("skill_gap_agent", "aggregate_suggestions")
+graph.add_edge("expression_agent", "aggregate_suggestions")
+graph.add_edge("strategy_agent", "aggregate_suggestions")
+
+graph.add_edge("aggregate_suggestions", "rewrite")
 graph.add_edge("rewrite", END)
 
 app = graph.compile()

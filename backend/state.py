@@ -1,5 +1,6 @@
 # state.py
 from typing import TypedDict, Annotated
+import operator
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
@@ -23,8 +24,14 @@ class ResumeAnalysisState(TypedDict):
     matched_skills: list[str]  # 匹配的技能
     missing_skills: list[str]  # 缺失的技能
 
-    # 优化建议 Agent 输出
-    suggestions: str           # 针对性优化建议
+    # Supervisor 输出
+    agents_to_run: list[str]   # supervisor 决定启动哪些子 Agent
+
+    # 子 Agent 并行输出（operator.add 确保并行写入时追加而不是覆盖）
+    sub_suggestions: Annotated[list[str], operator.add]
+
+    # 聚合后的优化建议
+    suggestions: str           # 汇总后的针对性优化建议
 
     # 简历重写 Agent 输出
     rewritten_resume: str      # 重写后的简历段落
