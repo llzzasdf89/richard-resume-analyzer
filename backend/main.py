@@ -39,6 +39,8 @@ def run_graph(resume_text: str, jd_text: str):
         "match_score": 0,
         "matched_skills": [],
         "missing_skills": [],
+        "agents_to_run": [],
+        "sub_suggestions": [],
         "suggestions": "",
         "rewritten_resume": "",
         "error": "",
@@ -77,7 +79,7 @@ async def analyze(
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 executor,
-                lambda: run_graph(resume_text,jd_text=jd)
+                lambda: run_graph(resume_text, jd_text=jd)
             )
             langfuse_context.flush()
 
