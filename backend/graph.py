@@ -77,14 +77,12 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
 
 分析步骤：
 1. 先阅读简历和JD，初步判断哪些缺失技能是关键缺口
-2. 对你不确定重要性的技能，调用 get_skill_market_demand 查询
+2. 对不确定重要性的技能调用 get_skill_market_demand 查询，最多查 3 次，优先查最关键的
 3. 如果需要更多市场参考，调用 search_similar_jobs 检索相似岗位
-4. 综合所有信息后，以 JSON 格式输出最终结果：
-{
-  "match_score": 75,
-  "matched_skills": ["技能1", "技能2"],
-  "missing_skills": ["缺失技能1", "缺失技能2"]
-}
+4. 工具调用完毕后，输出一个合法的 JSON 对象，包含以下三个字段：
+   - match_score：0-100 的整数，表示匹配度
+   - matched_skills：字符串数组，列出简历中已具备的匹配技能（填真实技能名，不要用占位符）
+   - missing_skills：字符串数组，列出简历中缺失的关键技能（填真实技能名，不要用占位符）
 
 评分规则：
 - 90-100：技能高度匹配，几乎满足所有要求
@@ -94,7 +92,7 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
 - 1-9：几乎无相关技能，但候选人有基础工程能力
 - 只有候选人完全没有任何技术背景时才给 0 分
 
-完成工具调用后，只返回 JSON，不要其他内容。"""),
+最终只输出 JSON 对象本身，不要包含任何解释文字。"""),
         HumanMessage(f"""简历内容：
 {state['resume_text']}
 
@@ -149,12 +147,23 @@ RAG 参考（已检索）：
         start = final_content.find("{")
         end = final_content.rfind("}") + 1
         data = json.loads(final_content[start:end])
+
+        matched = data.get("matched_skills", [])
+        missing = data.get("missing_skills", [])
+
+        # 兜底：如果模型输出了示例占位符而非真实结果，视为解析失败
+        placeholder_keywords = {"技能1", "技能2", "缺失技能1", "缺失技能2"}
+        if set(matched) & placeholder_keywords or set(missing) & placeholder_keywords:
+            print("[DEBUG] 检测到占位符输出，解析失败回退")
+            raise ValueError("模型输出了模板占位符")
+
         return {
             "match_score": data.get("match_score", 0),
-            "matched_skills": data.get("matched_skills", []),
-            "missing_skills": data.get("missing_skills", []),
+            "matched_skills": matched,
+            "missing_skills": missing,
         }
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] match_analysis 解析失败: {e}")
         return {
             "match_score": 0,
             "matched_skills": [],
