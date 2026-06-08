@@ -18,12 +18,14 @@ Resume Analyzer AI 在投简历之前帮你做一次「预审」：分析你的�
 
 - **PDF 简历解析**：上传 PDF，自动提取文本内容
 - **JD 深度分析**：提取核心要求、必备技能、加分项
-- **匹配度评分**：0-100 分，直观展示简历和 JD 的契合程度
-- **技能缺口分析**：明确列出匹配点和缺失点
-- **RAG 知识库**：检索相似岗位历史数据，提供更精准的参考
-- **优化建议**：结合匹配分析和知识库，生成针对性改进建议
+- **RAG 知识库**：向量检索 + Reranker 精排，检索相似岗位历史数据作参考
+- **匹配度评分**：ReAct Agent 自主调用工具查市场数据，输出 0-100 匹配分 + 技能缺口
+- **条件路由**：高匹配（≥75）直接重写简历；低匹配走完整建议流程
+- **Multi-Agent 并行建议**：Supervisor 决策分发，技能缺口 / 表达优化 / 投递策略三个子 Agent 并行执行
 - **简历重写**：针对目标 JD，重写简历关键段落
 - **流式输出**：SSE 实时展示分析过程
+- **可观测性**：Langfuse 追踪完整调用链路
+- **评测框架**：LLM-as-Judge 自动化评估建议质量
 
 ---
 
@@ -59,24 +61,44 @@ Resume Analyzer AI 在投简历之前帮你做一次「预审」：分析你的�
 
 ---
 
-## Multi-Agent 架构
+## 系统流程
 
 ```
 用户上传 PDF + 粘贴 JD
-  ↓
-[PDF 解析节点]      提取简历文本，存入 State
-  ↓
-[JD 分析 Agent]    提取核心要求、必备技能、加分项
-  ↓
-[RAG 检索节点]     检索相似岗位历史数据作为参考
-  ↓
-[匹配分析 Agent]   匹配度评分 + 匹配点 + 技能缺口
-  ↓
-[优化建议 Agent]   结合匹配分析 + RAG，生成针对性建议
-  ↓
-[简历重写 Agent]   针对 JD 重写简历关键段落
-  ↓
-流式输出结果
+        │
+        ▼
+   jd_analysis          提取 JD 核心要求、必备技能、加分项
+        │
+        ▼
+   rag_retrieval         向量检索 + Reranker 精排，找相似岗位作参考
+        │
+        ▼
+   match_analysis        ReAct Agent：自主调用工具查市场数据
+   （Tool Use）          输出匹配分 + 已匹配技能 + 缺失技能
+        │
+   [条件路由]
+        ├─ 分数 ≥75 ──────────────────────────────────────┐
+        │                                                  │
+        └─ 分数 <75                                        │
+              │                                            │
+              ▼                                            │
+          supervisor    LLM 决策：启动哪几个子 Agent        │
+              │                                            │
+         [并行 fan-out]                                    │
+        ┌────┼────┐                                        │
+        ▼    ▼    ▼                                        │
+   skill_ expr_ strat_  三个子 Agent 并行执行              │
+   _gap   ess   egy     技能缺口 / 表达优化 / 投递策略      │
+        └────┼────┘                                        │
+             ▼                                             │
+   aggregate_suggestions 汇总三路结果                      │
+             │                                             │
+             └──────────────────────┬────────────────────┘
+                                    │
+                                    ▼
+                                 rewrite    针对 JD 重写简历关键段落
+                                    │
+                                   END
 ```
 
 ---
@@ -87,20 +109,32 @@ Resume Analyzer AI 在投简历之前帮你做一次「预审」：分析你的�
 resume-analyzer/
   frontend/                  React + Vite 前端
     src/
-      components/            UI 组件
-      pages/                 页面
-      types/                 TypeScript 类型
-      api/                   API 调用封装
+      api/
+        analyze.ts           API 调用封装
+      components/
+        UploadForm.tsx        简历上传 + JD 输入表单
+        AnalysisResult.tsx   分析结果展示
+        MatchScore.tsx       匹配度评分组件
+        SkillTags.tsx        技能标签组件
+      types/
+        index.ts             TypeScript 类型定义
+      App.tsx
+      main.tsx
     package.json
     vite.config.ts
 
   backend/                   Python + FastAPI 后端
-    main.py                  FastAPI 入口
-    graph.py                 LangGraph 核心逻辑
-    state.py                 自定义 State
-    tools.py                 工具函数
-    rag.py                   RAG 知识库
-    requirements.txt
+    main.py                  FastAPI 入口 + SSE 流式响应
+    graph.py                 LangGraph 图定义（节点 + 路由 + 编译）
+    state.py                 ResumeAnalysisState 类型定义
+    tools.py                 LangChain 工具（PDF 解析 / 市场搜索）
+    rag.py                   RAG 知识库（Embedding + 向量检索 + Reranker）
+    db.py                    数据库连接管理
+    init_db.py               数据库初始化脚本
+    eval/
+      run_eval.py            LLM-as-Judge 评测脚本
+      fixtures.py            评测测试用例
+    pyproject.toml
     .env.example
 
   docker-compose.yml         统一编排前后端
@@ -202,13 +236,6 @@ data: {"type": "done", "content": "..."}
 ### GET /health
 
 服务健康检查。
-
----
-
-## 相关项目
-
-- [Code Reviewer AI（Next.js 版）](https://github.com/llzzasdf89/richard-code-reviewer) — 线上：[richard-code-reviewer.xyz](https://richard-code-reviewer.xyz)
-- [Code Reviewer AI（Python 版）](https://github.com/llzzasdf89/richard-code-reviewer-python)
 
 ---
 

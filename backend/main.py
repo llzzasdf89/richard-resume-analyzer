@@ -75,12 +75,17 @@ async def analyze(
             resume_text = parse_pdf(file_bytes)
             yield f"data: {json.dumps({'type': 'step', 'step': 'parsing', 'content': '简历解析完成'}, ensure_ascii=False)}\n\n"
 
-            # 运行 Multi-Agent 分析
+            # 运行 Multi-Agent 分析，同时每 2 秒发一次心跳防止 SSE 连接超时
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
+            future = loop.run_in_executor(
                 executor,
                 lambda: run_graph(resume_text, jd_text=jd)
             )
+            while not future.done():
+                yield ": heartbeat\n\n"   # SSE 注释格式，浏览器不触发 onmessage，仅保活
+                await asyncio.sleep(2)
+
+            result = await future
             langfuse_context.flush()
 
             # 逐步返回各阶段结果
