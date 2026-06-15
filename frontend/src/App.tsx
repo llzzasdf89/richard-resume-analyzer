@@ -11,6 +11,12 @@ const initialState: AnalysisState = {
   suggestions: "",
   rewrittenResume: "",
   error: "",
+  currentStep: {
+    type: "step",
+    step: "parsing",
+    content: "",
+    message: "",
+  },
 };
 
 export default function App() {
@@ -18,15 +24,27 @@ export default function App() {
 
   const handleSubmit = async (resume: File, jd: string) => {
     setState({ ...initialState, status: "loading" });
-
     try {
       await analyzeResume(resume, jd, (step) => {
+        setState((prev) => ({
+          ...prev,
+          currentStep: step,
+        }));
         if (step.type === "step" && step.step === "jd_analysis") {
-          setState((prev) => ({ ...prev, jdAnalysis: step.content }));
+          setState((prev) => ({
+            ...prev,
+            jdAnalysis: step.content,
+          }));
         } else if (step.type === "step" && step.step === "match_score") {
-          setState((prev) => ({ ...prev, matchResult: step.content }));
+          setState((prev) => ({
+            ...prev,
+            matchResult: step.content,
+          }));
         } else if (step.type === "step" && step.step === "suggestions") {
-          setState((prev) => ({ ...prev, suggestions: step.content }));
+          setState((prev) => ({
+            ...prev,
+            suggestions: step.content,
+          }));
         } else if (step.type === "done") {
           setState((prev) => ({
             ...prev,
@@ -38,6 +56,7 @@ export default function App() {
             ...prev,
             status: "error",
             error: step.message,
+            currentStep: step,
           }));
         }
       });
@@ -63,9 +82,7 @@ export default function App() {
           </p>
         </div>
 
-        {/* 两栏布局 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 左栏：输入 */}
+        <div className="d-flex flex-column">
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <UploadForm
               onSubmit={handleSubmit}
@@ -73,22 +90,8 @@ export default function App() {
             />
           </div>
 
-          {/* 右栏：结果 */}
-          <div>
-            {state.status === "idle" ? (
-              <div
-                className="flex flex-col items-center justify-center h-full
-                border border-dashed border-gray-300 rounded-xl p-12 text-center"
-              >
-                <div className="text-4xl mb-3">🤖</div>
-                <p className="text-sm font-medium text-gray-500">等待分析</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  上传简历并填写 JD 后，AI 将自动分析匹配情况
-                </p>
-              </div>
-            ) : (
-              <AnalysisResult state={state} />
-            )}
+          <div className="mt-[16px]">
+            <AnalysisResult state={state} />
           </div>
         </div>
       </div>

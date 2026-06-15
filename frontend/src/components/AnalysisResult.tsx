@@ -1,7 +1,6 @@
 import type { AnalysisState } from "../types";
 import MatchScore from "./MatchScore";
 import SkillTags from "./SkillTags";
-
 interface AnalysisResultProps {
   state: AnalysisState;
 }
@@ -76,7 +75,7 @@ export default function AnalysisResult({ state }: AnalysisResultProps) {
       {state.status === "loading" && !state.rewrittenResume && (
         <div className="flex items-center gap-3 text-sm text-gray-500 p-4">
           <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          AI 正在分析中...
+          {state.currentStep?.message ?? "加载中"}
         </div>
       )}
 
