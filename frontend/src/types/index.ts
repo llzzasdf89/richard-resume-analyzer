@@ -11,10 +11,10 @@ export interface MatchResult {
 }
 
 export type AnalysisStep =
-  | { type: "step"; step: "parsing"; content: string }
-  | { type: "step"; step: "jd_analysis"; content: JDAnalysis }
-  | { type: "step"; step: "match_score"; content: MatchResult }
-  | { type: "step"; step: "suggestions"; content: string }
+  | { type: "step"; step: "parsing"; content: string; message: string }
+  | { type: "step"; step: "jd_analysis"; content: JDAnalysis; message: string }
+  | { type: "step"; step: "match_score"; content: MatchResult; message: string }
+  | { type: "step"; step: "suggestions"; content: string; message: string }
   | { type: "done"; content: string }
   | { type: "error"; message: string };
 
@@ -25,4 +25,5 @@ export interface AnalysisState {
   suggestions: string;
   rewrittenResume: string;
   error: string;
+  currentStep: AnalysisStep;
 }
