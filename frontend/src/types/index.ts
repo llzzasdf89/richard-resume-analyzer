@@ -15,7 +15,7 @@ export type AnalysisStep =
   | { type: "step"; step: "jd_analysis"; content: JDAnalysis; message: string }
   | { type: "step"; step: "match_score"; content: MatchResult; message: string }
   | { type: "step"; step: "suggestions"; content: string; message: string }
-  | { type: "done"; content: string }
+  | { type: "done"; content: string; message?: string }
   | { type: "error"; message: string };
 
 export interface AnalysisState {
