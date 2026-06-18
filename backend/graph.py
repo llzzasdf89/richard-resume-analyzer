@@ -139,7 +139,16 @@ RAG 参考（已检索）：
         # 继续循环，让模型看到工具结果后决定下一步
 
     # ── 解析最终输出 ──────────────────────────────────────────
-    final_content = response.content if isinstance(response.content, str) else ""
+    if isinstance(response.content, str):
+        final_content = response.content
+    elif isinstance(response.content, list):
+        # model_with_tools returns content as a list of blocks; extract text blocks
+        final_content = "".join(
+            block["text"] for block in response.content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    else:
+        final_content = ""
     print(f"[DEBUG] match_analysis 最终输出: {final_content[:500]}")
 
     try:
