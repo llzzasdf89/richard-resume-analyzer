@@ -1,8 +1,4 @@
 import {
-  ArrowRight,
-  CheckCircle2,
-  ChevronDown,
-  CircleCheck,
   Crosshair,
   FileCheck2,
   FileText,
@@ -11,13 +7,9 @@ import {
   Network,
   PencilLine,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 
 import { workflowSteps } from "@/components/resume-analyzer/workflowSteps";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 const agentNodes = [
@@ -66,8 +58,6 @@ const agentNodes = [
 ];
 
 export function WorkflowPage() {
-  const navigate = useNavigate();
-
   return (
     <>
       <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 lg:grid-cols-[0.85fr_1.15fr]">
