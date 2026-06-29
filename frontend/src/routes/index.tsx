@@ -10,12 +10,14 @@ import {
 
 import { Spinner } from "@/components/ui/spinner";
 import { AppShell } from "@/layout/AppShell";
+import { PublicLayout } from "@/layout/PublicLayout";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { LandingPage } from "@/pages/LandingPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { NewAnalysisPage } from "@/pages/NewAnalysisPage";
 import { SavedResumesPage } from "@/pages/SavedResumesPage";
+import { WorkflowPage } from "@/pages/WorkflowPage";
 
 export function AppRoutes() {
   const [session, setSession] = useState<Session | null>(null);
@@ -60,7 +62,10 @@ export function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route element={<PublicLayout />}>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/workflow" element={<WorkflowPage />} />
+      </Route>
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/shell"

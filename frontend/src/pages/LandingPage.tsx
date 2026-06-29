@@ -1,13 +1,8 @@
-import {
-  ArrowRight,
-  BarChart3,
-  FileText,
-  Sparkles,
-  Upload,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { ScoreLine } from "@/components/resume-analyzer/ScoreLine";
+import { workflowSteps } from "@/components/resume-analyzer/workflowSteps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,24 +12,7 @@ export function LandingPage() {
   const onGetStarted = () => navigate("/login");
 
   return (
-    <main className="min-h-screen bg-[#060a12] text-white">
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-600">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <span className="font-semibold">Resume Analyzer</span>
-        </div>
-        <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
-          <a href="#features">Features</a>
-          <a href="#workflow">How It Works</a>
-          <a href="#about">About</a>
-        </nav>
-        <Button onClick={onGetStarted} className="cursor-pointer">
-          Get Started
-        </Button>
-      </header>
-
+    <>
       <section className="mx-auto grid max-w-7xl items-center gap-12 px-6 pb-20 pt-14 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
           <Badge className="border-violet-500/30 bg-white/5 text-violet-100">
@@ -59,6 +37,7 @@ export function LandingPage() {
             <Button
               variant="outline"
               className="h-12 border-white/20 bg-transparent px-6 text-white hover:bg-white/10 cursor-pointer"
+              onClick={() => navigate("/workflow")}
             >
               See Workflow
             </Button>
@@ -94,37 +73,20 @@ export function LandingPage() {
 
       <section id="workflow" className="bg-slate-50 px-6 py-16 text-slate-950">
         <h2 className="text-center text-3xl font-bold">How It Works</h2>
-        <div className="mx-auto mt-10 grid max-w-6xl gap-5 md:grid-cols-4">
-          {[
-            ["Upload Resume", Upload, "Upload a PDF resume up to 5MB."],
-            [
-              "Paste Job Description",
-              FileText,
-              "Add the target role description.",
-            ],
-            [
-              "AI Analysis",
-              Sparkles,
-              "Specialist agents evaluate fit and gaps.",
-            ],
-            [
-              "Get Actionable Insights",
-              BarChart3,
-              "Download a private PDF report.",
-            ],
-          ].map(([title, Icon, description]) => (
-            <Card key={title as string} className="p-6">
+        <div className="mx-auto mt-10 grid max-w-7xl gap-5 md:grid-cols-3 lg:grid-cols-5">
+          {workflowSteps.map((step) => (
+            <Card key={step.title} className="p-6">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
-                <Icon className="h-5 w-5" />
+                <step.icon className="h-5 w-5" />
               </div>
-              <h3 className="font-semibold">{title as string}</h3>
+              <h3 className="font-semibold">{step.title}</h3>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                {description as string}
+                {step.description}
               </p>
             </Card>
           ))}
         </div>
       </section>
-    </main>
+    </>
   );
 }
