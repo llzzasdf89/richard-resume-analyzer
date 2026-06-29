@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 
 
 def parse_pdf(file_bytes: bytes) -> str:
-    """解析 PDF 文件，返回文本内容"""
+    """Parse a PDF file and return extracted text."""
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     text = ""
     for page in doc:
@@ -15,8 +15,10 @@ def parse_pdf(file_bytes: bytes) -> str:
 
 @tool
 def search_similar_jobs(query: str) -> str:
-    """根据技能或岗位关键词，搜索知识库中相似的岗位JD，获取市场参考信息。
-    当需要了解某类岗位的典型要求、或验证某个技能在市场上的普遍程度时调用。
+    """Search similar job descriptions in the knowledge base.
+
+    Use this when the model needs typical role requirements or market context
+    for a skill or position keyword.
     """
     from rag import search_similar_jds
     return search_similar_jds(query)
@@ -24,19 +26,21 @@ def search_similar_jobs(query: str) -> str:
 
 @tool
 def get_skill_market_demand(skill: str) -> str:
-    """查询某个技能在当前招聘市场的真实需求情况。
-    当评估候选人缺失某个技能对匹配度的实际影响时调用，帮助判断该技能是硬性门槛还是加分项。
+    """Search current hiring-market demand for a skill.
+
+    Use this when evaluating how much a missing skill should affect the match
+    score and whether it is likely a hard requirement or a nice-to-have.
     """
     from tavily import TavilyClient
     import os
 
     client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
     result = client.search(
-        query=f"{skill} 技能招聘市场需求 2025 是否必备",
+        query=f"{skill} hiring market demand 2025 required skill or nice to have",
         max_results=3,
         search_depth="basic",
     )
     snippets = [item["content"] for item in result.get("results", [])]
     if not snippets:
-        return f"未找到关于 {skill} 的市场需求信息"
-    return f"【{skill} 市场需求参考】\n" + "\n---\n".join(snippets)
+        return f"No market demand information found for {skill}"
+    return f"{skill} Market Demand Reference\n" + "\n---\n".join(snippets)

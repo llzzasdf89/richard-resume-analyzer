@@ -18,10 +18,10 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* PDF 上传 */}
+      {/* PDF upload */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          上传简历（PDF）
+          Upload Resume (PDF)
         </label>
         <div
           onClick={() => fileRef.current?.click()}
@@ -46,27 +46,27 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
             <div className="space-y-1">
               <div className="text-2xl">📄</div>
               <p className="text-sm font-medium text-blue-600">{resume.name}</p>
-              <p className="text-xs text-gray-400">点击重新选择</p>
+              <p className="text-xs text-gray-400">Click to choose another file</p>
             </div>
           ) : (
             <div className="space-y-1">
               <div className="text-2xl">⬆️</div>
-              <p className="text-sm text-gray-500">点击上传 PDF 简历</p>
-              <p className="text-xs text-gray-400">支持 PDF 格式</p>
+              <p className="text-sm text-gray-500">Click to upload your PDF resume</p>
+              <p className="text-xs text-gray-400">PDF files only</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* JD 输入 */}
+      {/* Job description input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          目标职位描述（JD）
+          Target Job Description
         </label>
         <textarea
           value={jd}
           onChange={(e) => setJd(e.target.value)}
-          placeholder="粘贴招聘 JD 全文..."
+          placeholder="Paste the full job description..."
           rows={8}
           disabled={isLoading}
           className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
@@ -86,10 +86,10 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
         {isLoading ? (
           <>
             <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            分析中...
+            Analyzing...
           </>
         ) : (
-          "开始分析"
+          "Start Analysis"
         )}
       </button>
     </form>

@@ -2,22 +2,22 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装系统依赖
+# Install system dependencies.
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv
+# Install uv.
 RUN pip install uv
 
-# 复制依赖文件
+# Copy dependency files.
 COPY pyproject.toml uv.lock ./
 
-# 安装依赖
+# Install dependencies.
 RUN uv sync --frozen --no-dev
 
-# 复制源码
+# Copy source code.
 COPY . .
 
 EXPOSE 8000

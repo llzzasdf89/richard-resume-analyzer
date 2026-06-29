@@ -7,34 +7,34 @@ from langgraph.graph.message import add_messages
 class ResumeAnalysisState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-    # 输入
-    resume_text: str           # 解析后的简历文本
-    jd_text: str               # JD 文本
+    # Inputs
+    resume_text: str           # Parsed resume text
+    jd_text: str               # Job description text
 
-    # JD 分析 Agent 输出
-    jd_requirements: str       # JD 核心要求
-    jd_must_skills: list[str]  # 必备技能
-    jd_nice_skills: list[str]  # 加分技能
+    # Job description analysis output
+    jd_requirements: str       # Core job requirements
+    jd_must_skills: list[str]  # Required skills
+    jd_nice_skills: list[str]  # Nice-to-have skills
 
-    # RAG 检索结果
-    rag_context: str           # 检索到的相似岗位参考
+    # RAG retrieval output
+    rag_context: str           # Retrieved similar job context
 
-    # 匹配分析 Agent 输出
-    match_score: int           # 匹配度 0-100
-    matched_skills: list[str]  # 匹配的技能
-    missing_skills: list[str]  # 缺失的技能
+    # Match analysis output
+    match_score: int           # Match score from 0 to 100
+    matched_skills: list[str]  # Skills matched by the resume
+    missing_skills: list[str]  # Skills missing from the resume
 
-    # Supervisor 输出
-    agents_to_run: list[str]   # supervisor 决定启动哪些子 Agent
+    # Supervisor output
+    agents_to_run: list[str]   # Specialist agents selected by the supervisor
 
-    # 子 Agent 并行输出（operator.add 确保并行写入时追加而不是覆盖）
+    # Parallel specialist agent output. operator.add appends instead of overwriting.
     sub_suggestions: Annotated[list[str], operator.add]
 
-    # 聚合后的优化建议
-    suggestions: str           # 汇总后的针对性优化建议
+    # Aggregated optimization suggestions
+    suggestions: str           # Combined targeted suggestions
 
-    # 简历重写 Agent 输出
-    rewritten_resume: str      # 重写后的简历段落
+    # Resume rewrite output
+    rewritten_resume: str      # Rewritten resume sections
 
-    # 错误处理
+    # Error state
     error: str
