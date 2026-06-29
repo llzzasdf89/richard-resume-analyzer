@@ -435,7 +435,9 @@ The Supabase project must enable Google and GitHub OAuth providers, and the loca
 
 ```text
 http://localhost:5173
+http://localhost:5173/shell
 http://127.0.0.1:5173
+http://127.0.0.1:5173/shell
 ```
 
 ### One-Command Startup
