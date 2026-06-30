@@ -14,10 +14,10 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DASHSCOPE_API_KEY = os.getenv("API_KEY")
 reranker = FlagReranker('BAAI/bge-reranker-v2-m3', use_fp16=True) # Setting use_fp16 to True speeds up computation with a slight performance degradation
 
-# ── Embedding ─────────────────────────────────────────────
+# Embedding
 
 def get_embedding(text: str) -> list[float]:
-    """调用 DashScope Embedding API"""
+    """Call the DashScope embedding API."""
     res = requests.post(
         "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
         headers={
@@ -32,7 +32,7 @@ def get_embedding(text: str) -> list[float]:
     )
     return res.json()["output"]["embeddings"][0]["embedding"]
 
-# ── 写入 JD ────────────────────────────────────────────────
+# Insert job description knowledge
 
 def add_jd_to_knowledge(title: str, content: str):
     embedding = get_embedding(content)
@@ -40,15 +40,15 @@ def add_jd_to_knowledge(title: str, content: str):
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO jd_knowledge (title, content, embedding) VALUES (%s, %s, %s)",
-        (title, content, np.array(embedding))  # 转成 numpy array
+        (title, content, np.array(embedding))
     )
     conn.commit()
     cur.close()
     conn.close()
-    return "添加成功"
+    return "Knowledge added"
 
 def rerank_documents(query: str, documents: list[str], top_n: int = 3) -> list[int]:
-    """对RAG查询出的结果进行二次过滤，返回最有关联的top_n个结果"""
+    """Rerank retrieved RAG documents and return the top document indexes."""
     scores = []
     for index,doc in enumerate(documents):
         scores.append({
@@ -69,9 +69,9 @@ def search_similar_jds(query: str, k: int = 3) -> str:
     try:
         cur.execute("SELECT COUNT(*) FROM jd_knowledge")
         count = cur.fetchone()[0]
-        print(f"知识库总数据量：{count}")
+        print(f"Knowledge base row count: {count}")
 
-        # 向量召回：多取候选，再 Rerank 精排
+        # Retrieve extra vector candidates, then rerank them.
         candidate_k = min(k * 3, count)
         cur.execute(
             f"""
@@ -82,11 +82,11 @@ def search_similar_jds(query: str, k: int = 3) -> str:
             """
         )
         rows = cur.fetchall()
-        print(f"向量召回候选数：{len(rows)}")
+        print(f"Vector retrieval candidates: {len(rows)}")
 
     except Exception as e:
         import traceback
-        print(f"SQL 执行错误：{traceback.format_exc()}")
+        print(f"SQL execution error: {traceback.format_exc()}")
         rows = []
 
     finally:
@@ -94,19 +94,19 @@ def search_similar_jds(query: str, k: int = 3) -> str:
         conn.close()
 
     if not rows:
-        return "知识库暂无相似岗位数据"
+        return "No similar job descriptions found in the knowledge base"
 
-    # Rerank 精排
+    # Rerank candidates.
     documents = [content for _, content in rows]
     try:
         top_indices = rerank_documents(query, documents, top_n=k)
         reranked_rows = [rows[i] for i in top_indices]
-        print(f"Rerank 后 Top {k}：{[rows[i][0] for i in top_indices]}")
+        print(f"Reranked top {k}: {[rows[i][0] for i in top_indices]}")
     except Exception as e:
-        print(f"Rerank 失败，回退到向量召回结果：{e}")
+        print(f"Rerank failed; falling back to vector results: {e}")
         reranked_rows = rows[:k]
 
     results = []
     for title, content in reranked_rows:
-        results.append(f"【{title}】\n{content}")
+        results.append(f"{title}\n{content}")
     return "\n\n---\n\n".join(results)

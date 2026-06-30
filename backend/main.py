@@ -4,15 +4,19 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
-from graph import app as analysis_graph
-from tools import parse_pdf
-from rag import add_jd_to_knowledge
 from dotenv import load_dotenv
 import json
 from db import init_db
 import os
 from langfuse.decorators import langfuse_context
 from langfuse import Langfuse
+from middleware.access_log import AccessLogMiddleware
+from middleware.request_id import RequestIdMiddleware
+from routers.analyses import router as analyses_router
+from routers.auth import router as auth_router
+from routers.health import router as health_router
+from routers.reports import router as reports_router
+from routers.resumes import router as resumes_router
 
 load_dotenv()
 
@@ -26,11 +30,14 @@ langfuse_context.configure(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时初始化数据库
+    # Initialize the database on startup.
     init_db()
     yield
 
 server = FastAPI(title="Resume Analyzer API", lifespan = lifespan)
+
+server.add_middleware(AccessLogMiddleware)
+server.add_middleware(RequestIdMiddleware)
 
 server.add_middleware(
     CORSMiddleware,
@@ -38,6 +45,12 @@ server.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+server.include_router(health_router, tags=["health"])
+server.include_router(auth_router, prefix="/api/v1", tags=["auth"])
+server.include_router(analyses_router, prefix="/api/v1", tags=["analyses"])
+server.include_router(resumes_router, prefix="/api/v1", tags=["resumes"])
+server.include_router(reports_router, prefix="/api/v1", tags=["reports"])
 
 @server.post("/api/analyze")
 async def analyze(
@@ -48,10 +61,13 @@ async def analyze(
 
     async def generate():
         try:
-            # 解析 PDF（同步，速度快，不需要 astream）
-            yield f"data: {json.dumps({'type': 'progress', 'step': 'parsing', 'message': '简历解析中'}, ensure_ascii=False)}\n\n"
+            from graph import app as analysis_graph
+            from tools import parse_pdf
+
+            # Parse the PDF before starting the graph stream.
+            yield f"data: {json.dumps({'type': 'progress', 'step': 'parsing', 'message': 'Parsing resume'}, ensure_ascii=False)}\n\n"
             resume_text = parse_pdf(file_bytes)
-            yield f"data: {json.dumps({'type': 'step', 'step': 'parsing', 'message': '简历解析完成'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step', 'step': 'parsing', 'message': 'Resume parsed'}, ensure_ascii=False)}\n\n"
 
             initial_state = {
                 "messages": [],
@@ -71,23 +87,23 @@ async def analyze(
                 "error": "",
             }
 
-            # 节点名 → 前端展示的"处理中"文案
+            # Node name to frontend processing label.
             NODE_LABELS = {
-                "jd_analysis":           "JD 分析中",
-                "rag_retrieval":         "RAG 检索中",
-                "match_analysis":        "匹配度分析中",
-                "supervisor":            "正在启用技能缺口分析agent，表达优化agent，投递策略分析agent",
-                "skill_gap_agent":       "技能缺口分析中",
-                "expression_agent":      "表达优化分析中",
-                "strategy_agent":        "投递策略分析中",
-                "aggregate_suggestions": "汇总建议中",
-                "rewrite":               "简历重写中",
+                "jd_analysis":           "Analyzing job description",
+                "rag_retrieval":         "Retrieving similar job context",
+                "match_analysis":        "Calculating match score",
+                "supervisor":            "Selecting specialist agents",
+                "skill_gap_agent":       "Analyzing skill gaps",
+                "expression_agent":      "Reviewing resume expression",
+                "strategy_agent":        "Preparing application strategy",
+                "aggregate_suggestions": "Combining recommendations",
+                "rewrite":               "Optimizing resume content",
             }
             TRACKED_NODES = set(NODE_LABELS.keys())
 
-            # astream_events(version="v2")：
-            #   on_chain_start → 节点刚开始，推"处理中"
-            #   on_chain_end   → 节点完成，推实际结果
+            # astream_events(version="v2"):
+            #   on_chain_start pushes a processing label.
+            #   on_chain_end pushes the node output.
             async for event in analysis_graph.astream_events(initial_state, version="v2"):
                 kind      = event["event"]
                 node_name = event.get("name", "")
@@ -102,25 +118,25 @@ async def analyze(
                     output = event["data"].get("output") or {}
 
                     if node_name == "jd_analysis":
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'jd_analysis', 'message': 'JD 分析完成', 'content': {'requirements': output.get('jd_requirements', ''), 'must_skills': output.get('jd_must_skills', []), 'nice_skills': output.get('jd_nice_skills', [])}}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'jd_analysis', 'message': 'Job description analysis completed', 'content': {'requirements': output.get('jd_requirements', ''), 'must_skills': output.get('jd_must_skills', []), 'nice_skills': output.get('jd_nice_skills', [])}}, ensure_ascii=False)}\n\n"
 
                     elif node_name == "rag_retrieval":
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'rag_retrieval', 'message': 'RAG 检索完成'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'rag_retrieval', 'message': 'RAG retrieval completed'}, ensure_ascii=False)}\n\n"
 
                     elif node_name == "match_analysis":
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'match_score', 'message': '匹配分析完成', 'content': {'score': output.get('match_score', 0), 'matched': output.get('matched_skills', []), 'missing': output.get('missing_skills', [])}}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'match_score', 'message': 'Match analysis completed', 'content': {'score': output.get('match_score', 0), 'matched': output.get('matched_skills', []), 'missing': output.get('missing_skills', [])}}, ensure_ascii=False)}\n\n"
 
                     elif node_name == "supervisor":
                         agents = output.get('agents_to_run', [])
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'supervisor', 'message': f'启动子任务：{agents}'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'supervisor', 'message': f'Starting specialist agents: {agents}'}, ensure_ascii=False)}\n\n"
 
                     elif node_name in ("skill_gap_agent", "expression_agent", "strategy_agent"):
                         sub = output.get("sub_suggestions", [])
                         if sub:
-                            yield f"data: {json.dumps({'type': 'step', 'step': node_name, 'content': sub[-1], "message":f'{node_name} 分析完成'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'step', 'step': node_name, 'content': sub[-1], "message":f'{node_name} completed'}, ensure_ascii=False)}\n\n"
 
                     elif node_name == "aggregate_suggestions":
-                        yield f"data: {json.dumps({'type': 'step', 'step': 'suggestions', 'content': output.get('suggestions', ''), "message":"所有子agent结果汇总完成"}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step', 'step': 'suggestions', 'content': output.get('suggestions', ''), "message":"All specialist recommendations combined"}, ensure_ascii=False)}\n\n"
 
                     elif node_name == "rewrite":
                         yield f"data: {json.dumps({'type': 'done', 'content': output.get('rewritten_resume', '')}, ensure_ascii=False)}\n\n"
@@ -140,12 +156,9 @@ class KnowledgeRequest(BaseModel):
 @server.post("/api/knowledge")
 async def add_knowledge(request: KnowledgeRequest):
     try:
+        from rag import add_jd_to_knowledge
+
         add_jd_to_knowledge(request.title, request.content)
-        return {"success": True, "message": "添加成功"}
+        return {"success": True, "message": "Knowledge added"}
     except Exception as e:
         return {"success": False, "message": str(e)}
-
-
-@server.get("/health")
-async def health():
-    return {"status": "ok"}

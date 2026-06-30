@@ -52,13 +52,13 @@ export default function MatchScore({ result }: MatchScoreProps) {
       <div className="flex items-center gap-6">
         <ScoreRing score={result.score} />
         <div>
-          <h3 className="font-semibold text-gray-800 mb-1">匹配度评分</h3>
+          <h3 className="font-semibold text-gray-800 mb-1">Match Score</h3>
           <p className="text-sm text-gray-500">
             {result.score >= 80
-              ? "非常匹配，建议直接投递"
+              ? "Strong match. This role is worth applying for."
               : result.score >= 60
-                ? "基本匹配，优化后投递"
-                : "匹配度较低，建议针对性提升"}
+                ? "Good foundation. Improve the resume before applying."
+                : "Lower match. Focused improvements are recommended."}
           </p>
         </div>
       </div>
@@ -66,7 +66,7 @@ export default function MatchScore({ result }: MatchScoreProps) {
       {result.matched.length > 0 && (
         <div>
           <p className="text-xs font-medium text-gray-500 mb-2">
-            ✅ 已匹配技能
+            ✅ Matched Skills
           </p>
           <SkillTags skills={result.matched} variant="matched" />
         </div>
@@ -74,7 +74,7 @@ export default function MatchScore({ result }: MatchScoreProps) {
 
       {result.missing.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-gray-500 mb-2">❌ 缺失技能</p>
+          <p className="text-xs font-medium text-gray-500 mb-2">❌ Missing Skills</p>
           <SkillTags skills={result.missing} variant="missing" />
         </div>
       )}

@@ -19,26 +19,26 @@ model = ChatAnthropic(
     model=os.getenv("MODEL_NAME"),
 )
 
-# 绑定工具的模型，专用于 match_analysis ReAct Agent
+# Model bound to tools for the match_analysis ReAct agent.
 _tools = [search_similar_jobs, get_skill_market_demand]
 _tool_map = {t.name: t for t in _tools}
 model_with_tools = model.bind_tools(_tools)
 
-# ── 节点定义 ────────────────────────────────────────────────
+# Graph nodes
 
 @observe(name="jd_analysis")
 def jd_analysis_node(state: ResumeAnalysisState) -> dict:
-    """JD 分析 Agent：提取核心要求、必备技能、加分项"""
+    """Extract core requirements, required skills, and nice-to-have skills."""
     response = model.invoke([
-        SystemMessage("""你是一个 JD 分析专家。
-分析给定的职位描述，提取以下信息，以 JSON 格式返回：
+        SystemMessage("""You are a job description analysis expert.
+Analyze the given job description and return the following information as JSON:
 {
-  "requirements": "岗位核心要求描述",
-  "must_skills": ["必备技能1", "必备技能2"],
-  "nice_skills": ["加分技能1", "加分技能2"]
+  "requirements": "A concise description of the core role requirements",
+  "must_skills": ["required skill 1", "required skill 2"],
+  "nice_skills": ["nice-to-have skill 1", "nice-to-have skill 2"]
 }
-只返回 JSON，不要其他内容。"""),
-        HumanMessage(f"请分析这个 JD：\n\n{state['jd_text']}")
+Return JSON only. Do not include any extra text."""),
+        HumanMessage(f"Analyze this job description:\n\n{state['jd_text']}")
     ])
 
     try:
@@ -57,88 +57,88 @@ def jd_analysis_node(state: ResumeAnalysisState) -> dict:
 
 @observe(name="rag_retrieval")
 def rag_retrieval_node(state: ResumeAnalysisState) -> dict:
-    """RAG 检索节点：检索相似岗位历史数据"""
+    """Retrieve similar historical job descriptions from the RAG store."""
     query = f"{state['jd_requirements']} {' '.join(state['jd_must_skills'])}"
-    print(f"RAG 查询词：{query}")  # 加这行
+    print(f"RAG query: {query}")
     context = search_similar_jds(query)
-    print(f"RAG 检索结果：\n{context[:300]}")
+    print(f"RAG retrieval result:\n{context[:300]}")
     return {"rag_context": context}
 
 @observe(name="match_analysis")
 def match_analysis_node(state: ResumeAnalysisState) -> dict:
-    """匹配分析 Agent：ReAct 循环，自主决定是否调用工具查询市场信息，再给出评分"""
+    """Run ReAct match analysis and decide whether market tools are needed."""
 
     messages = [
-        SystemMessage("""你是一个简历匹配分析专家。
+        SystemMessage("""You are a resume-to-job match analysis expert.
 
-你有两个工具可以调用：
-- search_similar_jobs：根据技能/岗位关键词检索知识库中相似的岗位JD，用于参考市场要求
-- get_skill_market_demand：查询某个技能的市场需求程度，用于判断缺失技能的严重性
+You can use two tools:
+- search_similar_jobs: retrieve similar job descriptions from the knowledge base for market reference.
+- get_skill_market_demand: check how important a skill is in the hiring market.
 
-分析步骤：
-1. 先阅读简历和JD，初步判断哪些缺失技能是关键缺口
-2. 对不确定重要性的技能调用 get_skill_market_demand 查询，最多查 3 次，优先查最关键的
-3. 如果需要更多市场参考，调用 search_similar_jobs 检索相似岗位
-4. 工具调用完毕后，输出一个合法的 JSON 对象，包含以下三个字段：
-   - match_score：0-100 的整数，表示匹配度
-   - matched_skills：字符串数组，列出简历中已具备的匹配技能（填真实技能名，不要用占位符）
-   - missing_skills：字符串数组，列出简历中缺失的关键技能（填真实技能名，不要用占位符）
+Analysis steps:
+1. Read the resume and job description, then identify the most important skill gaps.
+2. For skills with uncertain importance, call get_skill_market_demand up to 3 times. Prioritize the most critical gaps.
+3. If more market context is needed, call search_similar_jobs.
+4. After tool use is complete, return a valid JSON object with exactly these fields:
+   - match_score: an integer from 0 to 100.
+   - matched_skills: an array of real skills already shown in the resume.
+   - missing_skills: an array of real key skills missing from the resume.
 
-评分规则：
-- 90-100：技能高度匹配，几乎满足所有要求
-- 70-89：核心技能匹配，少量缺口
-- 40-69：部分匹配，有明显缺口
-- 10-39：相关性低，主要技能不符
-- 1-9：几乎无相关技能，但候选人有基础工程能力
-- 只有候选人完全没有任何技术背景时才给 0 分
+Scoring guide:
+- 90-100: Highly aligned and satisfies nearly all requirements.
+- 70-89: Core skills match, with a few gaps.
+- 40-69: Partial match with clear gaps.
+- 10-39: Low relevance and major skill mismatch.
+- 1-9: Almost no relevant skills, but the candidate has some engineering foundation.
+- Use 0 only when the candidate has no relevant technical background.
 
-最终只输出 JSON 对象本身，不要包含任何解释文字。"""),
-        HumanMessage(f"""简历内容：
+Return only the JSON object. Do not include explanations."""),
+        HumanMessage(f"""Resume:
 {state['resume_text']}
 
-JD 核心要求：
+Core job requirements:
 {state['jd_requirements']}
 
-必备技能：
+Required skills:
 {', '.join(state['jd_must_skills'])}
 
-加分技能：
+Nice-to-have skills:
 {', '.join(state['jd_nice_skills'])}
 
-RAG 参考（已检索）：
+Retrieved RAG context:
 {state['rag_context']}
 
-请开始分析。"""),
+Start the analysis."""),
     ]
 
-    # ── ReAct 循环 ────────────────────────────────────────────
-    MAX_ITERATIONS = 5  # 防止无限循环
+    # ReAct loop.
+    MAX_ITERATIONS = 5
     for i in range(MAX_ITERATIONS):
         response = model_with_tools.invoke(messages)
         messages.append(response)
 
-        print(f"[DEBUG] match_analysis 第{i+1}轮，tool_calls: {[tc['name'] for tc in response.tool_calls]}")
+        print(f"[DEBUG] match_analysis round {i+1}, tool_calls: {[tc['name'] for tc in response.tool_calls]}")
 
-        # 没有工具调用 → 模型认为推理完成，退出循环
+        # No tool calls means the model considers the reasoning complete.
         if not response.tool_calls:
             break
 
-        # 执行所有工具调用，把结果还给模型
+        # Execute every tool call and return the result to the model.
         for tool_call in response.tool_calls:
             tool_fn = _tool_map.get(tool_call["name"])
             if tool_fn is None:
-                result = f"未知工具：{tool_call['name']}"
+                result = f"Unknown tool: {tool_call['name']}"
             else:
                 result = tool_fn.invoke(tool_call["args"])
-                print(f"[DEBUG] 工具 {tool_call['name']} 返回: {str(result)[:200]}")
+                print(f"[DEBUG] Tool {tool_call['name']} returned: {str(result)[:200]}")
 
             messages.append(ToolMessage(
                 content=str(result),
                 tool_call_id=tool_call["id"],
             ))
-        # 继续循环，让模型看到工具结果后决定下一步
+        # Continue so the model can decide the next step after seeing tool results.
 
-    # ── 解析最终输出 ──────────────────────────────────────────
+    # Parse final output.
     if isinstance(response.content, str):
         final_content = response.content
     elif isinstance(response.content, list):
@@ -149,10 +149,10 @@ RAG 参考（已检索）：
         )
     else:
         final_content = ""
-    print(f"[DEBUG] match_analysis 最终输出: {final_content[:500]}")
+    print(f"[DEBUG] match_analysis final output: {final_content[:500]}")
 
     try:
-        # 兼容模型在 JSON 前后附带说明文字的情况
+        # Tolerate brief text around JSON if the model adds it.
         start = final_content.find("{")
         end = final_content.rfind("}") + 1
         data = json.loads(final_content[start:end])
@@ -160,11 +160,11 @@ RAG 参考（已检索）：
         matched = data.get("matched_skills", [])
         missing = data.get("missing_skills", [])
 
-        # 兜底：如果模型输出了示例占位符而非真实结果，视为解析失败
-        placeholder_keywords = {"技能1", "技能2", "缺失技能1", "缺失技能2"}
+        # Treat placeholder outputs as parse failures.
+        placeholder_keywords = {"skill 1", "skill 2", "missing skill 1", "missing skill 2"}
         if set(matched) & placeholder_keywords or set(missing) & placeholder_keywords:
-            print("[DEBUG] 检测到占位符输出，解析失败回退")
-            raise ValueError("模型输出了模板占位符")
+            print("[DEBUG] Placeholder output detected; falling back")
+            raise ValueError("Model returned template placeholders")
 
         return {
             "match_score": data.get("match_score", 0),
@@ -172,7 +172,7 @@ RAG 参考（已检索）：
             "missing_skills": missing,
         }
     except Exception as e:
-        print(f"[DEBUG] match_analysis 解析失败: {e}")
+        print(f"[DEBUG] match_analysis parse failed: {e}")
         return {
             "match_score": 0,
             "matched_skills": [],
@@ -181,23 +181,23 @@ RAG 参考（已检索）：
 
 @observe(name="supervisor")
 def supervisor_node(state: ResumeAnalysisState) -> dict:
-    """Supervisor Agent：分析当前匹配情况，决定启动哪些子 Agent"""
+    """Decide which specialist agents should run."""
     response = model.invoke([
-        SystemMessage("""你是一个任务分配专家，负责根据简历匹配情况决定启动哪些优化方向。
+        SystemMessage("""You are a task routing expert. Decide which optimization directions are needed based on the resume match result.
 
-你有三个子 Agent 可以调度：
-- skill_gap：当候选人有明显技能缺口时，专门给出学习路径和补足建议
-- expression：当简历表达可以优化时（措辞、量化数据、STAR 结构），给出具体改写建议
-- strategy：当需要投递策略建议时（投递时机、岗位选择、谈判策略），给出指导
+You can route to three specialist agents:
+- skill_gap: use when the candidate has meaningful skill gaps and needs a learning path.
+- expression: use when resume phrasing, metrics, or STAR structure can be improved.
+- strategy: use when application strategy guidance is needed.
 
-请根据以下情况，返回需要启动的子 Agent 列表（JSON 格式）：
+Return the needed agents as JSON:
 {"agents": ["skill_gap", "expression", "strategy"]}
 
-说明：可以选择 1-3 个，根据实际需要决定，不必全选。"""),
-        HumanMessage(f"""匹配度：{state['match_score']}分
-已匹配技能：{', '.join(state['matched_skills'])}
-缺失技能：{', '.join(state['missing_skills'])}
-JD 核心要求：{state['jd_requirements']}"""),
+You can choose 1-3 agents. Do not select all unless all are useful."""),
+        HumanMessage(f"""Match score: {state['match_score']}
+Matched skills: {', '.join(state['matched_skills'])}
+Missing skills: {', '.join(state['missing_skills'])}
+Core job requirements: {state['jd_requirements']}"""),
     ])
 
     try:
@@ -206,12 +206,12 @@ JD 核心要求：{state['jd_requirements']}"""),
     except Exception:
         agents = ["skill_gap", "expression", "strategy"]
 
-    print(f"[DEBUG] Supervisor 决定启动子 Agent：{agents}")
+    print(f"[DEBUG] Supervisor selected specialist agents: {agents}")
     return {"agents_to_run": agents}
 
 
 def supervisor_fan_out(state: ResumeAnalysisState) -> list[Send]:
-    """根据 supervisor 的决策，用 Send 并行分发到各子 Agent"""
+    """Fan out to specialist agents selected by the supervisor."""
     agent_map = {
         "skill_gap": "skill_gap_agent",
         "expression": "expression_agent",
@@ -226,107 +226,108 @@ def supervisor_fan_out(state: ResumeAnalysisState) -> list[Send]:
 
 @observe(name="skill_gap_agent")
 def skill_gap_agent_node(state: ResumeAnalysisState) -> dict:
-    """子 Agent：专门针对技能缺口给出学习路径和补足建议"""
+    """Provide learning paths and gap-closing suggestions for missing skills."""
     response = model.invoke([
-        SystemMessage("你是一个技能成长顾问，专门帮助求职者分析技能缺口并给出可执行的学习路径。"),
-        HumanMessage(f"""候选人缺失以下技能：{', '.join(state['missing_skills'])}
+        SystemMessage("You are a skill growth advisor who gives practical learning paths for job seekers."),
+        HumanMessage(f"""The candidate is missing these skills: {', '.join(state['missing_skills'])}
 
-目标岗位核心要求：{state['jd_requirements']}
+Core target role requirements: {state['jd_requirements']}
 
-请针对每个缺失技能，给出：
-1. 该技能的重要程度（必须补 / 加分项）
-2. 最短学习路径（具体资源或方式）
-3. 预计补足时间
+For each missing skill, provide:
+1. Importance level (must-have or nice-to-have).
+2. Shortest practical learning path.
+3. Estimated time to close the gap.
 
-格式简洁，每个技能一段。"""),
+Keep the format concise. Use one paragraph per skill."""),
     ])
-    print(f"[DEBUG] skill_gap_agent 完成")
-    return {"sub_suggestions": [f"【技能缺口补足建议】\n{response.content}"]}
+    print(f"[DEBUG] skill_gap_agent completed")
+    return {"sub_suggestions": [f"Skill Gap Recommendations\n{response.content}"]}
 
 
 @observe(name="expression_agent")
 def expression_agent_node(state: ResumeAnalysisState) -> dict:
-    """子 Agent：专门优化简历表达方式"""
+    """Improve resume wording, impact framing, and role alignment."""
     response = model.invoke([
-        SystemMessage("你是一个简历表达优化专家，擅长将平淡的工作描述改写成有力的成果导向表达。"),
-        HumanMessage(f"""简历内容（节选关键部分）：
+        SystemMessage("You are a resume writing expert who turns plain work descriptions into strong outcome-oriented bullets."),
+        HumanMessage(f"""Resume excerpt:
 {state['resume_text'][:1500]}
 
-目标 JD 关键词：{', '.join(state['jd_must_skills'])}
+Target job keywords: {', '.join(state['jd_must_skills'])}
 
-请给出 2-3 条具体的表达优化建议，要求：
-- 指出原文中具体可以改进的句子或段落
-- 给出改写示例
-- 说明改写原则（量化数据 / STAR 结构 / 关键词匹配）"""),
+Provide 2-3 specific expression improvements:
+- Point to the specific sentence or section that can be improved.
+- Provide a rewritten example.
+- Explain the principle, such as metrics, STAR structure, or keyword alignment."""),
     ])
-    print(f"[DEBUG] expression_agent 完成")
-    return {"sub_suggestions": [f"【简历表达优化建议】\n{response.content}"]}
+    print(f"[DEBUG] expression_agent completed")
+    return {"sub_suggestions": [f"Resume Expression Recommendations\n{response.content}"]}
 
 
 @observe(name="strategy_agent")
 def strategy_agent_node(state: ResumeAnalysisState) -> dict:
-    """子 Agent：专门给出投递策略建议"""
+    """Provide practical application strategy guidance."""
     response = model.invoke([
-        SystemMessage("你是一个求职策略顾问，擅长根据候选人现状给出务实的投递和谈判建议。"),
-        HumanMessage(f"""当前匹配度：{state['match_score']}分
-已匹配技能：{', '.join(state['matched_skills'])}
-缺失技能：{', '.join(state['missing_skills'])}
-以下是知识库中相似岗位的参考数据（仅供参考，不是候选人要投的岗位）：
+        SystemMessage("You are a job search strategy advisor who gives practical application and positioning advice."),
+        HumanMessage(f"""Current match score: {state['match_score']}
+Matched skills: {', '.join(state['matched_skills'])}
+Missing skills: {', '.join(state['missing_skills'])}
+Similar job context from the knowledge base:
 {state['rag_context'][:500]}
 
-候选人当前要投递的目标岗位要求是：
+The candidate's target role requirements are:
 {state['jd_requirements']}
 
-请给出 2-3 条投递策略建议，包括：
-- 当前匹配度下是否值得投递
-- 投递时如何在 cover letter 或沟通中扬长避短
-- 是否有更适合的相近岗位方向"""),
+Give 2-3 application strategy recommendations, including:
+- Whether the role is worth applying to at the current match level.
+- How to position strengths and gaps in a cover letter or recruiter conversation.
+- Whether adjacent roles may be a better fit."""),
     ])
-    print(f"[DEBUG] strategy_agent 完成")
-    return {"sub_suggestions": [f"【投递策略建议】\n{response.content}"]}
+    print(f"[DEBUG] strategy_agent completed")
+    return {"sub_suggestions": [f"Application Strategy Recommendations\n{response.content}"]}
 
 
 @observe(name="aggregate_suggestions")
 def aggregate_suggestions_node(state: ResumeAnalysisState) -> dict:
-    """聚合节点：汇总所有子 Agent 的输出"""
+    """Combine all specialist agent outputs."""
     combined = "\n\n---\n\n".join(state.get("sub_suggestions", []))
-    print(f"[DEBUG] 聚合 {len(state.get('sub_suggestions', []))} 个子 Agent 结果")
+    print(f"[DEBUG] Aggregating {len(state.get('sub_suggestions', []))} specialist results")
     return {"suggestions": combined}
 
 @observe(name="rewrite")
 def rewrite_node(state: ResumeAnalysisState) -> dict:
-    """简历重写 Agent：针对 JD 重写简历关键段落"""
+    """Rewrite key resume sections for the target job description."""
     response = model.invoke([
-        SystemMessage("你是一个简历写作专家，擅长针对特定 JD 优化简历表达。"),
-        HumanMessage(f"""原始简历：
+        SystemMessage("You are a resume writing expert who optimizes resume content for a specific job description."),
+        HumanMessage(f"""Original resume:
 {state['resume_text']}
 
-目标 JD 要求：
+Target job requirements:
 {state['jd_requirements']}
 
-必备技能：{', '.join(state['jd_must_skills'])}
+Required skills: {', '.join(state['jd_must_skills'])}
 
-缺失技能（需要在简历中补强或诚实说明）：{', '.join(state['missing_skills'])}
+Missing skills to strengthen or honestly address: {', '.join(state['missing_skills'])}
 
-请重写简历中的「工作经历」和「技能」部分，使其更符合目标 JD 的要求。
-注意：只重写表达方式，不要捏造不存在的经历。""")
+Rewrite the Work Experience and Skills sections so they better align with the target job description.
+Do not fabricate experience. Only improve framing, wording, structure, and emphasis.""")
     ])
     return {"rewritten_resume": response.content}
 
-# ── 条件路由 ──────────────────────────────────────────────
+# Conditional routing
 
 def route_after_match(state: ResumeAnalysisState) -> str:
-    """根据匹配分数决定下一个节点：
-    - 高匹配（>=75）：直接重写简历，跳过 Supervisor 流程
-    - 低匹配（<75）：走 Supervisor → 子 Agent 并行 → 聚合 → 重写
+    """Decide the next node based on match score.
+
+    - High match (>=75): rewrite directly and skip supervisor.
+    - Lower match (<75): supervisor, specialist agents, aggregate, then rewrite.
     """
     score = state.get("match_score", 0)
     route = "rewrite" if score >= 75 else "supervisor"
-    print(f"[DEBUG] 匹配分数: {score}，路由至: {route}")
+    print(f"[DEBUG] Match score: {score}; route: {route}")
     return route
 
 
-# ── 构建图 ────────────────────────────────────────────────
+# Build graph
 
 graph = StateGraph(ResumeAnalysisState)
 
@@ -334,7 +335,7 @@ graph.add_node("jd_analysis", jd_analysis_node)
 graph.add_node("rag_retrieval", rag_retrieval_node)
 graph.add_node("match_analysis", match_analysis_node)
 
-# Multi-Agent 节点
+# Multi-agent nodes
 graph.add_node("supervisor", supervisor_node)
 graph.add_node("skill_gap_agent", skill_gap_agent_node)
 graph.add_node("expression_agent", expression_agent_node)
@@ -347,16 +348,16 @@ graph.set_entry_point("jd_analysis")
 graph.add_edge("jd_analysis", "rag_retrieval")
 graph.add_edge("rag_retrieval", "match_analysis")
 
-# match_analysis 后条件路由
+# Conditional route after match analysis.
 graph.add_conditional_edges(
     "match_analysis",
     route_after_match
 )
 
-# Supervisor 决策后并行 fan-out（Send API）
+# Parallel fan-out after supervisor routing.
 graph.add_conditional_edges("supervisor", supervisor_fan_out)
 
-# 三个子 Agent 都汇入聚合节点
+# All specialist agents merge into the aggregation node.
 graph.add_edge("skill_gap_agent", "aggregate_suggestions")
 graph.add_edge("expression_agent", "aggregate_suggestions")
 graph.add_edge("strategy_agent", "aggregate_suggestions")

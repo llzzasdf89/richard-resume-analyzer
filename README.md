@@ -1,241 +1,481 @@
 # Resume Analyzer AI
 
-> 基于 Multi-Agent + RAG 的智能简历分析工具
+> An AI-powered resume analysis workspace built with Multi-Agent workflows and RAG.
 >
-> 上传 PDF 简历 + 粘贴 JD，AI 自动分析匹配度、找出技能缺口、给出针对性优化建议并重写简历关键段落。
+> After signing in, users can upload a PDF resume, paste a target job description, run an asynchronous fit analysis, generate a PDF report, and revisit previous resumes and analysis history.
 
 ---
 
-## 产品背景
+## Breaking Change Notice
 
-投了简历之后已读不回，不知道是岗位招满了还是简历不符合条件——这是求职过程中最普遍的痛点。
+The next planned version is a breaking change. It upgrades the project from a single demo-style analysis flow into a product workspace with authentication, history, file storage, and report archiving.
 
-Resume Analyzer AI 在投简历之前帮你做一次「预审」：分析你的简历和目标 JD 的匹配程度，找出缺口，告诉你哪里要改、怎么改。
-
----
-
-## 功能特性
-
-- **PDF 简历解析**：上传 PDF，自动提取文本内容
-- **JD 深度分析**：提取核心要求、必备技能、加分项
-- **RAG 知识库**：向量检索 + Reranker 精排，检索相似岗位历史数据作参考
-- **匹配度评分**：ReAct Agent 自主调用工具查市场数据，输出 0-100 匹配分 + 技能缺口
-- **条件路由**：高匹配（≥75）直接重写简历；低匹配走完整建议流程
-- **Multi-Agent 并行建议**：Supervisor 决策分发，技能缺口 / 表达优化 / 投递策略三个子 Agent 并行执行
-- **简历重写**：针对目标 JD，重写简历关键段落
-- **流式输出**：SSE 实时展示分析过程
-- **可观测性**：Langfuse 追踪完整调用链路
-- **评测框架**：LLM-as-Judge 自动化评估建议质量
+See [CHANGELOG.md](./CHANGELOG.md) for the detailed change log.
 
 ---
 
-## 技术栈
+## Product Positioning
 
-### 前端
+Resume Analyzer AI helps job seekers tailor resumes before applying, especially candidates applying to technical roles.
 
-| 模块     | 技术                         |
-| -------- | ---------------------------- |
-| 框架     | React 18 + Vite + TypeScript |
-| 样式     | Tailwind CSS                 |
-| 状态管理 | Zustand                      |
-| HTTP     | Axios                        |
+It focuses on four problems:
 
-### 后端
+- Users do not know how well their resume matches a target job description.
+- Users do not know which skill gaps matter most.
+- Users do not know how to rewrite resume content for a specific role.
+- Users cannot easily find past uploaded resumes and analysis reports.
 
-| 模块     | 技术                              |
-| -------- | --------------------------------- |
-| Web 框架 | FastAPI + Uvicorn                 |
-| AI 框架  | LangChain + LangGraph             |
-| AI 模型  | Anthropic Claude（via DashScope） |
-| RAG      | pgvector + PostgreSQL             |
-| PDF 解析 | PyMuPDF                           |
-| 运行时   | Python 3.11+                      |
-
-### 部署
-
-| 模块     | 技术                    |
-| -------- | ----------------------- |
-| 容器化   | Docker + docker-compose |
-| 服务器   | AWS EC2                 |
-| 反向代理 | Nginx                   |
+The new version is centered on a private user workspace. After login, users can upload resumes, analyze job descriptions, view reports, revisit history, and download both the original resume PDF and the generated analysis report PDF.
 
 ---
 
-## 系统流程
+## Scope
 
-```
-用户上传 PDF + 粘贴 JD
-        │
-        ▼
-   jd_analysis          提取 JD 核心要求、必备技能、加分项
-        │
-        ▼
-   rag_retrieval         向量检索 + Reranker 精排，找相似岗位作参考
-        │
-        ▼
-   match_analysis        ReAct Agent：自主调用工具查市场数据
-   （Tool Use）          输出匹配分 + 已匹配技能 + 缺失技能
-        │
-   [条件路由]
-        ├─ 分数 ≥75 ──────────────────────────────────────┐
-        │                                                  │
-        └─ 分数 <75                                        │
-              │                                            │
-              ▼                                            │
-          supervisor    LLM 决策：启动哪几个子 Agent        │
-              │                                            │
-         [并行 fan-out]                                    │
-        ┌────┼────┐                                        │
-        ▼    ▼    ▼                                        │
-   skill_ expr_ strat_  三个子 Agent 并行执行              │
-   _gap   ess   egy     技能缺口 / 表达优化 / 投递策略      │
-        └────┼────┘                                        │
-             ▼                                             │
-   aggregate_suggestions 汇总三路结果                      │
-             │                                             │
-             └──────────────────────┬────────────────────┘
-                                    │
-                                    ▼
-                                 rewrite    针对 JD 重写简历关键段落
-                                    │
-                                   END
-```
+### Included In This Iteration
+
+- Google and GitHub OAuth login.
+- User-scoped analysis history.
+- User-scoped resume file management.
+- PDF resume uploads up to `5MB`.
+- Original resume PDF storage on the server filesystem.
+- Job description analysis.
+- Asynchronous AI analysis tasks.
+- Real-time progress through SSE.
+- Persisted analysis results.
+- PDF report generation and download.
+- Unified API response shape.
+- MVC-style backend restructuring.
+- Polished SaaS-style frontend UI.
+
+### Not Included In This Iteration
+
+- Payments, subscriptions, or Pro plans.
+- Email/password authentication.
+- Team workspaces.
+- Object storage services.
+- Redis, Celery, RQ, or external task queues.
+- Multi-instance backend deployment.
+- Public knowledge-base management pages.
 
 ---
 
-## 项目结构
+## Tech Stack
 
-```
-resume-analyzer/
-  frontend/                  React + Vite 前端
-    src/
-      api/
-        analyze.ts           API 调用封装
-      components/
-        UploadForm.tsx        简历上传 + JD 输入表单
-        AnalysisResult.tsx   分析结果展示
-        MatchScore.tsx       匹配度评分组件
-        SkillTags.tsx        技能标签组件
-      types/
-        index.ts             TypeScript 类型定义
-      App.tsx
-      main.tsx
-    package.json
-    vite.config.ts
+### Frontend
 
-  backend/                   Python + FastAPI 后端
-    main.py                  FastAPI 入口 + SSE 流式响应
-    graph.py                 LangGraph 图定义（节点 + 路由 + 编译）
-    state.py                 ResumeAnalysisState 类型定义
-    tools.py                 LangChain 工具（PDF 解析 / 市场搜索）
-    rag.py                   RAG 知识库（Embedding + 向量检索 + Reranker）
-    db.py                    数据库连接管理
-    init_db.py               数据库初始化脚本
-    eval/
-      run_eval.py            LLM-as-Judge 评测脚本
-      fixtures.py            评测测试用例
-    pyproject.toml
-    .env.example
+| Area | Technology |
+| --- | --- |
+| Framework | React + Vite + TypeScript |
+| UI | shadcn/ui |
+| Styling | Tailwind CSS |
+| Icons | lucide-react |
+| Auth Client | Supabase JS |
+| HTTP | Axios |
 
-  docker-compose.yml         统一编排前后端
-  README.md
+### Backend
+
+| Area | Technology |
+| --- | --- |
+| Web Framework | FastAPI + Uvicorn |
+| Concurrency | asyncio |
+| AI Orchestration | LangChain + LangGraph |
+| RAG | pgvector + PostgreSQL |
+| PDF Parsing | PyMuPDF |
+| Auth Verification | Supabase JWT |
+| File Storage | Local server filesystem + Docker volume |
+| Runtime | Python 3.11+ |
+
+### Deployment
+
+| Area | Technology |
+| --- | --- |
+| Containers | Docker + docker-compose |
+| Database | PostgreSQL + pgvector |
+| Backend Instance | Single instance |
+| Persistent Files | `/app/uploads` Docker volume |
+
+---
+
+## New User Flow
+
+```text
+Landing Page
+    |
+    v
+Login with Google/GitHub
+    |
+    v
+Upload Resume PDF
+    |
+    v
+Paste Job Description
+    |
+    v
+POST /api/v1/analyses
+    |
+    v
+Backend starts asyncio analysis task immediately
+    |
+    v
+GET /api/v1/analyses/{analysis_id}/events
+    |
+    v
+Analysis Progress UI
+    |
+    v
+Analysis Result + PDF Report
+    |
+    v
+History / Saved Resumes
 ```
 
 ---
 
-## 快速开始
+## API Contract
 
-### 环境要求
+All product APIs use the versioned prefix:
 
-- Node.js >= 18
-- Python >= 3.11
-- PostgreSQL >= 14（需要 pgvector 插件）
-
-### 启动后端
-
-```bash
-cd backend
-
-# 创建虚拟环境
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 API Key
-
-
-# 1. 第一次部署时初始化数据库（只需要跑一次）
-
-python init_db.py
-
-# 启动服务
-uvicorn main:server --reload --port 8000
-
+```text
+/api/v1
 ```
 
-### 启动前端
+### Unified Response Shape
 
-```bash
-cd frontend
+Normal HTTP APIs return HTTP status `200` by default. Business success or failure is determined from the response body.
 
-# 安装依赖
-npm install
-
-# 启动
-npm run dev
-# 访问 http://localhost:5173
-```
-
-### Docker 一键启动
-
-```bash
-# 根目录下
-docker-compose up -d --build
-```
-
----
-
-## API 文档
-
-### POST /api/analyze
-
-上传简历并分析匹配度。
-
-**请求（multipart/form-data）：**
-
-```
-resume: File（PDF 格式）
-jd: string（JD 文本）
-```
-
-**响应（SSE 流式）：**
-
-```
-data: {"type": "step", "step": "jd_analysis", "content": "..."}
-data: {"type": "step", "step": "match_score", "content": "..."}
-data: {"type": "step", "step": "suggestions", "content": "..."}
-data: {"type": "step", "step": "rewrite", "content": "..."}
-data: {"type": "done", "content": "..."}
-```
-
-### POST /api/knowledge
-
-向 RAG 知识库添加 JD 数据。
+Success:
 
 ```json
 {
-  "title": "岗位名称",
-  "content": "JD 全文"
+  "success": true,
+  "message": "OK",
+  "data": {},
+  "code": 200
 }
 ```
 
-### GET /health
+Failure:
 
-服务健康检查。
+```json
+{
+  "success": false,
+  "message": "Only PDF files up to 5MB are supported",
+  "data": null,
+  "code": 500
+}
+```
+
+### Auth
+
+```http
+GET /api/v1/me
+```
+
+All `/api/v1/*` product APIs require:
+
+```http
+Authorization: Bearer <supabase_access_token>
+```
+
+### Analyses
+
+```http
+POST   /api/v1/analyses
+GET    /api/v1/analyses
+GET    /api/v1/analyses/{analysis_id}
+GET    /api/v1/analyses/{analysis_id}/events
+DELETE /api/v1/analyses/{analysis_id}
+```
+
+`POST /api/v1/analyses` uses `multipart/form-data`:
+
+```text
+resume: File
+jd_text: string
+job_title?: string
+company?: string
+```
+
+After creation, the backend immediately starts an asynchronous analysis task and returns:
+
+```json
+{
+  "success": true,
+  "message": "OK",
+  "code": 200,
+  "data": {
+    "analysis_id": "uuid",
+    "resume_id": "uuid",
+    "status": "processing"
+  }
+}
+```
+
+`GET /api/v1/analyses/{analysis_id}` returns the current status snapshot or completed result.
+
+`GET /api/v1/analyses/{analysis_id}/events` streams real-time progress with SSE.
+
+### Resumes
+
+```http
+GET    /api/v1/resumes
+GET    /api/v1/resumes/{resume_id}
+GET    /api/v1/resumes/{resume_id}/file
+DELETE /api/v1/resumes/{resume_id}
+```
+
+Deleting a resume deletes the original PDF file, resume row, associated analyses, associated reports, and generated report PDFs. The frontend must show a destructive confirmation modal.
+
+### Reports
+
+```http
+GET    /api/v1/reports
+GET    /api/v1/reports/{report_id}
+GET    /api/v1/reports/{report_id}/file
+DELETE /api/v1/reports/{report_id}
+```
+
+The first version generates PDF reports and supports preview/download in the frontend.
+
+### Health
+
+```http
+GET /health
+```
+
+---
+
+## Data Model
+
+The new version needs these core tables:
+
+- `users`
+- `user_identities`
+- `resumes`
+- `analyses`
+- `reports`
+
+`resumes` stores original file metadata and a relative `storage_key`. It does not store file bytes.
+
+`analyses` stores task status, progress, job description text, score, and structured analysis results.
+
+`reports` stores the report content snapshot and generated PDF report file path.
+
+The existing `jd_knowledge` and RAG capability remains an internal backend capability. It is not exposed as a public product API in the first iteration.
+
+---
+
+## Backend Structure
+
+The backend stays flat under `backend/`. Do not add an extra `app/` wrapper directory.
+
+```text
+backend/
+  main.py
+  core/
+  middleware/
+  routers/
+  schemas/
+  controllers/
+  models/
+  services/
+  graph/
+  eval/
+  uploads/
+```
+
+Responsibilities:
+
+- `routers`: API routes, dependencies, request declarations, and response declarations.
+- `schemas`: Pydantic request and response models.
+- `controllers`: Business workflow orchestration.
+- `models`: Database access, transactions, and queries.
+- `services`: Domain services for auth, file storage, PDF handling, reports, and analysis streaming.
+- `middleware`: Request IDs, access logs, and error handling.
+- `graph`: LangGraph, RAG, and agent logic.
+
+---
+
+## Observability And Audit Logs
+
+Production logs are part of the product's dispute-resolution and support evidence. They must capture enough request-level context to investigate user complaints without exposing unnecessary secrets.
+
+Backend logging requirements:
+
+- Every request must have a request ID.
+- If the frontend retries the same request after a network issue, it must reuse the previous request ID.
+- Logs must include the request ID, authenticated user ID, HTTP method, route, important request parameters, response body summary, business `success`, business `code`, latency, and error details when present.
+- For analysis requests, logs must include the `analysis_id`, `resume_id`, current state, and progress step.
+- For model calls, logs must include the model name, prompt/input summary, response content or response summary, token usage when available, latency, and failure reason when present.
+- Logs must be written to files split by day.
+- Logs should avoid storing sensitive raw secrets, access tokens, or full binary file content.
+
+Recommended log directory:
+
+```text
+/app/logs
+```
+
+Docker should mount this directory as a persistent volume in production.
+
+---
+
+## Idempotency And Duplicate Submission Control
+
+Analysis creation must protect users and the backend from duplicate submissions caused by retries, double-clicks, or network instability.
+
+Frontend requirements:
+
+- Every request must include a request ID.
+- If a network retry happens, the frontend must reuse the same request ID instead of generating a new one.
+- The analysis submit button should remain disabled while the current analysis creation request is pending.
+
+Backend requirements:
+
+- The backend must accept and validate the request ID.
+- `POST /api/v1/analyses` must be idempotency-aware.
+- The backend should keep an idempotency record keyed by user ID and request ID.
+- The backend should maintain an explicit analysis state machine.
+- If the same user sends the same request ID again, the backend should return the existing result when safe.
+- If the uploaded resume is already associated with an active queued or processing analysis, the backend must reject the new analysis request and return a normal HTTP `200` response with business failure:
+
+```json
+{
+  "success": false,
+  "message": "This resume is already being analyzed. Please wait for the current task to finish.",
+  "data": {
+    "analysis_id": "uuid",
+    "status": "processing"
+  },
+  "code": 500
+}
+```
+
+The first version can use a state machine plus a resume task cache. PostgreSQL remains the durable source of truth, while in-memory cache can speed up active-task checks in the single-instance deployment.
+
+Expected analysis states:
+
+```text
+queued
+processing
+completed
+failed
+deleted
+```
+
+Valid state transitions:
+
+```text
+queued -> processing
+processing -> completed
+processing -> failed
+completed -> deleted
+failed -> deleted
+```
+
+Invalid transitions should be rejected and logged with the request ID and user ID.
+
+---
+
+## File Storage
+
+Production uses:
+
+```text
+/app/uploads
+```
+
+Docker must mount this directory as a persistent volume.
+
+Storage key examples:
+
+```text
+resumes/<user_id>/<resume_id>.pdf
+reports/<user_id>/<report_id>.pdf
+```
+
+Files are not exposed as public static assets. All preview and download requests must go through FastAPI ownership checks.
+
+---
+
+## Development
+
+### Environment
+
+Create a frontend environment file:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+Then fill in the Supabase project values:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+```
+
+Create a backend environment file:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Then fill in the backend Supabase values:
+
+```bash
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+```
+
+`SUPABASE_URL` is required for projects that issue `RS256` or `ES256` access tokens, because the backend verifies those tokens through the Supabase JWKS endpoint. `SUPABASE_JWT_SECRET` is still supported for legacy `HS256` tokens.
+
+The Supabase project must enable Google and GitHub OAuth providers, and the local site URL or redirect URL must allow:
+
+```text
+http://localhost:5173
+http://localhost:5173/shell
+http://127.0.0.1:5173
+http://127.0.0.1:5173/shell
+```
+
+### One-Command Startup
+
+```bash
+./dev.sh
+```
+
+This starts both development servers:
+
+- Backend: `http://127.0.0.1:8000`
+- Frontend: `http://127.0.0.1:5173`
+
+The script checks backend and frontend dependencies before startup. If backend dependencies are missing, it runs `uv sync`. If frontend dependencies are missing or stale, it runs `npm install`.
+
+Press `Ctrl+C` in the script terminal to stop both processes.
+
+### Backend
+
+```bash
+cd backend
+uv sync
+uvicorn main:server --reload --host 127.0.0.1 --port 8000
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+### Docker
+
+```bash
+docker-compose up -d --build
+```
 
 ---
 
