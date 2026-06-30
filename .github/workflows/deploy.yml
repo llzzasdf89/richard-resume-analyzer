@@ -12,6 +12,54 @@ jobs:
     environment: deploy
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: /api
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: backend
+          tags: richard-resume-analyzer-backend:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export backend image
+        run: docker save richard-resume-analyzer-backend:latest | gzip > backend-image.tar.gz
+
+      - name: Upload deployment artifacts
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "backend-image.tar.gz,docker-compose.yml,frontend/dist/*"
+          target: "~/richard-resume-analyzer"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -19,29 +67,30 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script_stop: true
-          command_timeout: 60m
           script: |
             set -e
 
             PROJECT_DIR=$HOME/richard-resume-analyzer
 
-            if [ ! -d "$PROJECT_DIR/.git" ]; then
-              echo "First deployment..."
-              git clone https://github.com/llzzasdf89/richard-resume-analyzer.git "$PROJECT_DIR"
-            fi
-
-            cd "$PROJECT_DIR"
+            mkdir -p "$PROJECT_DIR/frontend/dist" \
+              "$PROJECT_DIR/data/uploads" \
+              "$PROJECT_DIR/data/logs" \
+              "$PROJECT_DIR/cache/huggingface" \
+              "$PROJECT_DIR/cache/torch"
 
             if [ ! -f "$PROJECT_DIR/.env" ]; then
               echo "Missing $PROJECT_DIR/.env"
               exit 1
             fi
 
-            echo "Pull latest code..."
-            git pull origin main
+            cd "$PROJECT_DIR"
 
-            echo "Build containers..."
-            docker compose --env-file "$PROJECT_DIR/.env" up -d --build
+            echo "Load backend image..."
+            gzip -dc backend-image.tar.gz | docker load
+            rm -f backend-image.tar.gz
+
+            echo "Start backend container..."
+            docker compose --env-file "$PROJECT_DIR/.env" up -d --remove-orphans
 
             echo "Remove unused images..."
             docker image prune -af
