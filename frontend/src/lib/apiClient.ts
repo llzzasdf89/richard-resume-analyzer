@@ -1,8 +1,11 @@
 import axios from "axios";
 import { supabase } from "./supabase";
 
+const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const apiBaseUrl = rawApiBaseUrl.trim().replace(/\/+$/, "").replace(/\/api$/, "");
+
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
+  baseURL: apiBaseUrl,
 });
 
 apiClient.interceptors.request.use(async (config) => {
