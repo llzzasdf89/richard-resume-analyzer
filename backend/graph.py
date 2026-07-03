@@ -24,6 +24,42 @@ _tools = [search_similar_jobs, get_skill_market_demand]
 _tool_map = {t.name: t for t in _tools}
 model_with_tools = model.bind_tools(_tools)
 
+MATCH_ANALYSIS_SYSTEM_PROMPT = """You are a resume-to-job match analysis expert.
+
+You can use two tools:
+- search_similar_jobs: retrieve similar job descriptions from the knowledge base for market reference.
+- get_skill_market_demand: check how important a skill is in the hiring market.
+
+Current job description priority:
+- The current job description is the source of truth.
+- Retrieved RAG context is only secondary market reference.
+- Do not add skills from RAG context unless they are clearly relevant to the current job description.
+
+Analysis steps:
+1. Read the resume and current job description, then identify the most important role-fit signals and skill gaps.
+2. For skills with uncertain importance, call get_skill_market_demand up to 3 times. Prioritize the most critical gaps from the current job description.
+3. If more market context is needed, call search_similar_jobs.
+4. After tool use is complete, return a valid JSON object with exactly these fields:
+   - match_score: an integer from 0 to 100.
+   - matched_skills: an array of skills that are explicitly shown in the resume AND directly relevant to the current job description requirements.
+   - missing_skills: an array of important current-job-description skills or tools that are required or useful but not shown in the resume.
+
+Rules for matched_skills:
+- Do not include resume-only skills that are unrelated to the current job description.
+- Do not include frontend, backend, cloud, or AI engineering skills unless the current job description asks for them.
+- For example, do not include React for an ecology, biology, environmental science, or statistical-analysis role unless the job description explicitly asks for frontend development.
+- If a resume skill is impressive but unrelated to the current job description, leave it out of matched_skills.
+
+Scoring guide:
+- 90-100: Highly aligned and satisfies nearly all requirements.
+- 70-89: Core skills match, with a few gaps.
+- 40-69: Partial match with clear gaps.
+- 10-39: Low relevance and major skill mismatch.
+- 1-9: Almost no relevant skills, but the candidate has some transferable foundation.
+- Use 0 only when the candidate has no relevant background.
+
+Return only the JSON object. Do not include explanations."""
+
 # Graph nodes
 
 @observe(name="jd_analysis")
@@ -69,30 +105,7 @@ def match_analysis_node(state: ResumeAnalysisState) -> dict:
     """Run ReAct match analysis and decide whether market tools are needed."""
 
     messages = [
-        SystemMessage("""You are a resume-to-job match analysis expert.
-
-You can use two tools:
-- search_similar_jobs: retrieve similar job descriptions from the knowledge base for market reference.
-- get_skill_market_demand: check how important a skill is in the hiring market.
-
-Analysis steps:
-1. Read the resume and job description, then identify the most important skill gaps.
-2. For skills with uncertain importance, call get_skill_market_demand up to 3 times. Prioritize the most critical gaps.
-3. If more market context is needed, call search_similar_jobs.
-4. After tool use is complete, return a valid JSON object with exactly these fields:
-   - match_score: an integer from 0 to 100.
-   - matched_skills: an array of real skills already shown in the resume.
-   - missing_skills: an array of real key skills missing from the resume.
-
-Scoring guide:
-- 90-100: Highly aligned and satisfies nearly all requirements.
-- 70-89: Core skills match, with a few gaps.
-- 40-69: Partial match with clear gaps.
-- 10-39: Low relevance and major skill mismatch.
-- 1-9: Almost no relevant skills, but the candidate has some engineering foundation.
-- Use 0 only when the candidate has no relevant technical background.
-
-Return only the JSON object. Do not include explanations."""),
+        SystemMessage(MATCH_ANALYSIS_SYSTEM_PROMPT),
         HumanMessage(f"""Resume:
 {state['resume_text']}
 
@@ -107,6 +120,8 @@ Nice-to-have skills:
 
 Retrieved RAG context:
 {state['rag_context']}
+
+Use the current job description as the source of truth. The retrieved RAG context is only supporting market context.
 
 Start the analysis."""),
     ]

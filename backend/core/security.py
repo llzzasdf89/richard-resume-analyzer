@@ -1,7 +1,7 @@
 import ssl
 
 import certifi
-from fastapi import Request
+from fastapi import HTTPException, Request
 import jwt
 
 from controllers.auth_controller import sync_user_from_claims
@@ -24,34 +24,39 @@ def create_jwks_ssl_context() -> ssl.SSLContext:
 
 
 def decode_supabase_token(token: str) -> dict:
-    algorithm = jwt.get_unverified_header(token).get("alg")
+    try:
+        algorithm = jwt.get_unverified_header(token).get("alg")
 
-    if algorithm in ASYMMETRIC_ALGORITHMS:
-        signing_key = jwt.PyJWKClient(
-            get_supabase_jwks_url(),
-            ssl_context=create_jwks_ssl_context(),
-        ).get_signing_key_from_jwt(token)
+        if algorithm in ASYMMETRIC_ALGORITHMS:
+            signing_key = jwt.PyJWKClient(
+                get_supabase_jwks_url(),
+                ssl_context=create_jwks_ssl_context(),
+            ).get_signing_key_from_jwt(token)
+            return jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[algorithm],
+                audience="authenticated",
+                options={"verify_aud": False},
+            )
+
+        if algorithm != "HS256":
+            raise AppError(f"Unsupported Supabase JWT algorithm: {algorithm}")
+
+        if not settings.supabase_jwt_secret:
+            raise AppError("Supabase JWT secret is not configured")
+
         return jwt.decode(
             token,
-            signing_key.key,
+            settings.supabase_jwt_secret,
             algorithms=[algorithm],
             audience="authenticated",
             options={"verify_aud": False},
         )
-
-    if algorithm != "HS256":
-        raise AppError(f"Unsupported Supabase JWT algorithm: {algorithm}")
-
-    if not settings.supabase_jwt_secret:
-        raise AppError("Supabase JWT secret is not configured")
-
-    return jwt.decode(
-        token,
-        settings.supabase_jwt_secret,
-        algorithms=[algorithm],
-        audience="authenticated",
-        options={"verify_aud": False},
-    )
+    except AppError:
+        raise
+    except jwt.PyJWTError as exc:
+        raise AppError("Unauthorized") from exc
 
 
 def extract_bearer_token(request: Request) -> str:
@@ -63,8 +68,12 @@ def extract_bearer_token(request: Request) -> str:
 
 
 async def get_current_user(request: Request) -> dict:
-    token = extract_bearer_token(request)
-    claims = decode_supabase_token(token)
+    try:
+        token = extract_bearer_token(request)
+        claims = decode_supabase_token(token)
+    except AppError as exc:
+        raise HTTPException(status_code=401, detail=exc.message) from exc
+
     conn = get_conn()
     try:
         user = sync_user_from_claims(conn, claims)
