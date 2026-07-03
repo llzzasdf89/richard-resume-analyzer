@@ -62,9 +62,57 @@ async def analysis_events(
     analysis_id: str,
     current_user: dict = Depends(get_current_user),
 ):
+    analysis = get_analysis(current_user=current_user, analysis_id=analysis_id)
+    snapshot_event = _analysis_snapshot_event(analysis) if analysis else {
+        "type": "failed",
+        "analysis_id": analysis_id,
+        "message": "Analysis not found",
+    }
+
     async def generate():
+        yield _sse_event(snapshot_event)
+        if snapshot_event.get("type") in {"completed", "failed"}:
+            return
+
         async for event in stream_hub.subscribe(analysis_id):
-            yield f"event: {event.get('type', 'progress')}\n"
-            yield f"data: {json.dumps(event)}\n\n"
+            yield _sse_event(event)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _sse_event(event: dict) -> str:
+    return f"event: {event.get('type', 'progress')}\n" f"data: {json.dumps(event)}\n\n"
+
+
+def _analysis_snapshot_event(analysis: dict) -> dict:
+    analysis_id = str(analysis["id"])
+    status = analysis["status"]
+
+    if status == "completed":
+        return {
+            "type": "completed",
+            "analysis_id": analysis_id,
+            "status": "completed",
+            "progress": 100,
+            "score": analysis.get("score"),
+            "message": "Analysis completed",
+            "result": analysis.get("result") or {},
+        }
+
+    if status == "failed":
+        return {
+            "type": "failed",
+            "analysis_id": analysis_id,
+            "status": "failed",
+            "progress": 100,
+            "message": analysis.get("error") or "Analysis failed",
+        }
+
+    return {
+        "type": "progress",
+        "analysis_id": analysis_id,
+        "step": analysis.get("current_step") or status,
+        "status": status,
+        "progress": analysis.get("progress") or 0,
+        "message": f"Analysis is {status}",
+    }

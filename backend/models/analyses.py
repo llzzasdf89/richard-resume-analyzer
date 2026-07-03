@@ -30,7 +30,7 @@ def create_analysis(
         """
         INSERT INTO analyses (user_id, resume_id, jd_text, job_title, company, status, progress)
         VALUES (%s, %s, %s, %s, %s, 'queued', 0)
-        RETURNING id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, created_at, updated_at
+        RETURNING id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, steps_json, result_json, error, created_at, updated_at
         """,
         (user_id, resume_id, jd_text, job_title, company),
     )
@@ -43,7 +43,7 @@ def find_active_analysis_for_resume(conn, *, user_id: str, resume_id: str) -> di
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, created_at, updated_at
+        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, steps_json, result_json, error, created_at, updated_at
         FROM analyses
         WHERE user_id = %s
           AND resume_id = %s
@@ -56,6 +56,29 @@ def find_active_analysis_for_resume(conn, *, user_id: str, resume_id: str) -> di
     row = cur.fetchone()
     cur.close()
     return _analysis_row_to_dict(row) if row else None
+
+
+def get_analysis_task_payload(conn, *, analysis_id: str) -> dict | None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT analyses.id, analyses.resume_id, analyses.jd_text, resumes.parsed_text
+        FROM analyses
+        JOIN resumes ON resumes.id = analyses.resume_id
+        WHERE analyses.id = %s
+        """,
+        (analysis_id,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "resume_id": row[1],
+        "jd_text": row[2],
+        "resume_text": row[3] or "",
+    }
 
 
 def mark_analysis_processing(conn, *, analysis_id: str) -> None:
@@ -120,7 +143,7 @@ def list_analyses_for_user(conn, *, user_id: str, limit: int = 20, offset: int =
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, created_at, updated_at
+        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, steps_json, result_json, error, created_at, updated_at
         FROM analyses
         WHERE user_id = %s AND status != 'deleted'
         ORDER BY created_at DESC
@@ -137,7 +160,7 @@ def get_analysis_for_user(conn, *, user_id: str, analysis_id: str) -> dict | Non
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, created_at, updated_at
+        SELECT id, user_id, resume_id, jd_text, job_title, company, status, score, progress, current_step, steps_json, result_json, error, created_at, updated_at
         FROM analyses
         WHERE id = %s AND user_id = %s AND status != 'deleted'
         """,
@@ -173,6 +196,9 @@ def _analysis_row_to_dict(row) -> dict:
         "score",
         "progress",
         "current_step",
+        "steps",
+        "result",
+        "error",
         "created_at",
         "updated_at",
     ]

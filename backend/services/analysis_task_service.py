@@ -1,8 +1,14 @@
 import asyncio
 
-from models.analyses import mark_analysis_completed, mark_analysis_failed, mark_analysis_processing
+from models.analyses import (
+    get_analysis_task_payload,
+    mark_analysis_completed,
+    mark_analysis_failed,
+    mark_analysis_processing,
+)
 from models.db import get_conn
 from services.analysis_stream_service import stream_hub
+from services.langgraph_analysis_service import run_langgraph_analysis
 
 
 class ActiveResumeTasks:
@@ -51,15 +57,24 @@ async def run_analysis_task(*, user_id: str, resume_id: str, analysis_id: str) -
                 "message": "Analysis started",
             },
         )
-        result = {
-            "score": 87,
-            "current_step": "completed",
-            "summary": "Analysis completed successfully.",
-            "steps": [
-                {"step": "queued", "status": "completed"},
-                {"step": "completed", "status": "completed"},
-            ],
-        }
+
+        payload = get_analysis_task_payload(conn, analysis_id=analysis_id)
+        if payload is None:
+            raise ValueError("Analysis task payload not found")
+
+        result = None
+        async for event in run_langgraph_analysis(
+            resume_text=payload["resume_text"],
+            jd_text=payload["jd_text"],
+        ):
+            event_with_id = {"analysis_id": analysis_id, **event}
+            await stream_hub.publish(analysis_id, event_with_id)
+            if event.get("type") == "completed":
+                result = event.get("result", {})
+
+        if result is None:
+            raise ValueError("Analysis graph completed without a result")
+
         mark_analysis_completed(conn, analysis_id=analysis_id, result=result)
         conn.commit()
         await stream_hub.publish(
