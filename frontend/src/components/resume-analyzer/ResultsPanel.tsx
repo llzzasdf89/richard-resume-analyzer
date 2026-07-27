@@ -5,6 +5,7 @@ import { WorkflowPanel } from "@/components/resume-analyzer/WorkflowPanel";
 import { Card } from "@/components/ui/card";
 
 export function ResultsPanel({ result }: { result?: AnalysisResult | null }) {
+  console.log("result is ", result);
   const score = result?.score ?? 0;
   const matchedCount = result?.matched_skills?.length ?? 0;
   const missingCount = result?.missing_skills?.length ?? 0;
@@ -24,7 +25,7 @@ export function ResultsPanel({ result }: { result?: AnalysisResult | null }) {
     ? result.missing_skills
     : ["No critical gaps detected"];
   const recommendations =
-    result?.suggestions?.trim() ||
+    result?.suggestions?.trim?.() ||
     "No specialist recommendations were returned for this analysis.";
 
   return (
@@ -70,7 +71,7 @@ export function ResultsPanel({ result }: { result?: AnalysisResult | null }) {
         <h3 className="font-semibold">Rewrite Reference</h3>
         <div className="mt-4 max-h-[420px] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4">
           <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">
-            {result?.rewritten_resume?.trim() ||
+            {result?.rewritten_resume?.trim?.() ||
               "No rewrite reference was returned for this analysis."}
           </pre>
         </div>

@@ -7,9 +7,9 @@ from langfuse.decorators import observe
 from state import ResumeAnalysisState
 from rag import search_similar_jds
 from tools import search_similar_jobs, get_skill_market_demand
+from model_content import extract_json_object, extract_model_text
 from dotenv import load_dotenv
 import os
-import json
 
 load_dotenv()
 
@@ -78,7 +78,7 @@ Return JSON only. Do not include any extra text."""),
     ])
 
     try:
-        data = json.loads(response.content)
+        data = extract_json_object(response.content)
         return {
             "jd_requirements": data.get("requirements", ""),
             "jd_must_skills": data.get("must_skills", []),
@@ -86,7 +86,7 @@ Return JSON only. Do not include any extra text."""),
         }
     except Exception:
         return {
-            "jd_requirements": response.content,
+            "jd_requirements": extract_model_text(response.content),
             "jd_must_skills": [],
             "jd_nice_skills": [],
         }
@@ -154,23 +154,11 @@ Start the analysis."""),
         # Continue so the model can decide the next step after seeing tool results.
 
     # Parse final output.
-    if isinstance(response.content, str):
-        final_content = response.content
-    elif isinstance(response.content, list):
-        # model_with_tools returns content as a list of blocks; extract text blocks
-        final_content = "".join(
-            block["text"] for block in response.content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    else:
-        final_content = ""
+    final_content = extract_model_text(response.content)
     print(f"[DEBUG] match_analysis final output: {final_content[:500]}")
 
     try:
-        # Tolerate brief text around JSON if the model adds it.
-        start = final_content.find("{")
-        end = final_content.rfind("}") + 1
-        data = json.loads(final_content[start:end])
+        data = extract_json_object(final_content)
 
         matched = data.get("matched_skills", [])
         missing = data.get("missing_skills", [])
@@ -216,7 +204,7 @@ Core job requirements: {state['jd_requirements']}"""),
     ])
 
     try:
-        data = json.loads(response.content)
+        data = extract_json_object(response.content)
         agents = data.get("agents", ["skill_gap", "expression", "strategy"])
     except Exception:
         agents = ["skill_gap", "expression", "strategy"]
@@ -256,7 +244,11 @@ For each missing skill, provide:
 Keep the format concise. Use one paragraph per skill."""),
     ])
     print(f"[DEBUG] skill_gap_agent completed")
-    return {"sub_suggestions": [f"Skill Gap Recommendations\n{response.content}"]}
+    return {
+        "sub_suggestions": [
+            f"Skill Gap Recommendations\n{extract_model_text(response.content)}"
+        ]
+    }
 
 
 @observe(name="expression_agent")
@@ -275,7 +267,11 @@ Provide 2-3 specific expression improvements:
 - Explain the principle, such as metrics, STAR structure, or keyword alignment."""),
     ])
     print(f"[DEBUG] expression_agent completed")
-    return {"sub_suggestions": [f"Resume Expression Recommendations\n{response.content}"]}
+    return {
+        "sub_suggestions": [
+            f"Resume Expression Recommendations\n{extract_model_text(response.content)}"
+        ]
+    }
 
 
 @observe(name="strategy_agent")
@@ -298,7 +294,11 @@ Give 2-3 application strategy recommendations, including:
 - Whether adjacent roles may be a better fit."""),
     ])
     print(f"[DEBUG] strategy_agent completed")
-    return {"sub_suggestions": [f"Application Strategy Recommendations\n{response.content}"]}
+    return {
+        "sub_suggestions": [
+            f"Application Strategy Recommendations\n{extract_model_text(response.content)}"
+        ]
+    }
 
 
 @observe(name="aggregate_suggestions")
@@ -326,7 +326,7 @@ Missing skills to strengthen or honestly address: {', '.join(state['missing_skil
 Rewrite the Work Experience and Skills sections so they better align with the target job description.
 Do not fabricate experience. Only improve framing, wording, structure, and emphasis.""")
     ])
-    return {"rewritten_resume": response.content}
+    return {"rewritten_resume": extract_model_text(response.content)}
 
 # Conditional routing
 
