@@ -1,10 +1,10 @@
 import sys
 import os
-import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from graph import app
 from fixtures import TEST_CASES
+from model_content import extract_json_object
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
@@ -47,7 +47,7 @@ Match score: {score}
 Optimization suggestions: {suggestions}""")
     ])
     try:
-        return json.loads(response.content)
+        return extract_json_object(response.content)
     except Exception:
         return {"score": 0, "comment": "Parse failed", "is_actionable": False, "is_specific": False}
 
